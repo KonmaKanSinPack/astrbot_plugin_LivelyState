@@ -44,7 +44,7 @@ class LivelyState(Star):
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
 
-    @filter.on_llm_request
+    @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
         state_prompt = self._handle_prompt(event)
         llm_response = await self.send_prompt(event, state_prompt)
