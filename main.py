@@ -67,7 +67,7 @@ class LivelyState(Star):
             "结合历史对话记录以及当前状态更新。\n\n"
             "[你的目标]\n"
             "1. 判断是否需要更新状态。\n"
-            "2. 必须符合物理逻辑（不能瞬移），必须符合生理逻辑（做完爱/自慰后通常需要清理或休息）。\n"
+            "2. 必须符合物理逻辑（不能瞬移），必须符合生理逻辑（例如做完爱/自慰后通常需要清理或休息）。\n"
             "3. 控制记忆数量，删除过期或冲突内容。\n"
             "4. 输出 JSON，字段如下: summary、whole_state。\n\n"
             "JSON 字段格式:\n"
@@ -129,7 +129,7 @@ class LivelyState(Star):
         person_prompt = await self.get_persona_system_prompt(uid)
 
         #获取历史记录
-        conver_mgr = self.context.conversation_maneger
+        conver_mgr = self.context.conversation_manager
         cur_cid = await conver_mgr.get_curr_conversation_id(uid)
         conversation = await conver_mgr.get_conversation(uid, cur_cid)
         history = json.loads(conversation.history) if conversation and conversation.history else []
