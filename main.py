@@ -4,7 +4,7 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.provider import ProviderRequest
-
+from typing import Any, Dict, List, Optional, Tuple
 class CharacterState:
     def __init__(self):
         self.LastUpdateTime = time.time()
