@@ -95,6 +95,7 @@ class LivelyState(Star):
             f"**Current Physical State**: {state_info['State']}\n"
             f"**Emotional State**: {state_info['Emotion']}\n"
             f"**Energy Level**: {state_info['Energy']}/100 | **Desire Level**: {state_info['Thirst']}/100\n"
+            f"**Current User ID**: {uid}\n"
             f"**Target ID**: {target_id} (who this state is associated with; 'none' means global)\n"
             f"**Last State Update Reason**: {state_info.get('update_reason', 'unspecified')}\n"
             f"**Association Note**: {target_note}\n\n"
