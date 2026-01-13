@@ -113,20 +113,20 @@ class LivelyState(Star):
         return template
 
     def _handle_apply(self, event, payload_text: str) -> str:
-        try:
-            # 它能自动修好 90% 的弱智错误（比如没闭合的括号、多余逗号）
-            payload_text = json_repair.loads(payload_text) 
-            logger.info("解析成功！", payload_text)
-        except Exception as e:
-            logger.info("这模型没救了，重试吧", e)
-            payload_text = payload_text.strip()
-
         if not payload_text:
             return "请提供大模型返回的 JSON 内容。"
 
         json_text = self._extract_json_block(payload_text)
         if json_text is None:
             return "未能解析 JSON，请直接粘贴模型输出或 ```json ``` 代码块。"
+
+        try:
+            # 它能自动修好 90% 的弱智错误（比如没闭合的括号、多余逗号）
+            json_text = json_repair.loads(json_text) 
+            logger.info("解析成功！", json_text)
+        except Exception as e:
+            logger.info("这模型没救了，重试吧", e)
+            json_text = json_text.strip()
 
         try:
             operations = json.loads(json_text)
