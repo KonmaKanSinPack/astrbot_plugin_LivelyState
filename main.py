@@ -66,7 +66,7 @@ class LivelyState(Star):
             f"距离上次状态{self.global_state.State}已经过了{time.time() - self.global_state.LastUpdateTime}秒，现在是{time.time()}。请推演这段时间发生了什么，并决定是否要更新当前状态。"
             "[当前状态]\n"
             f"{self.global_state.get_whole_state()}\n\n"
-            "结合历史对话记录以及当前状态更新。\n\n"
+            "结合历史对话记录以及当前状态更新。注意，仅仅需要回复json结果，不要回复其他内容\n\n"
             "[你的目标]\n"
             "1. 判断是否需要更新状态。\n"
             "2. 必须符合物理逻辑（不能瞬移），必须符合生理逻辑（例如做完爱/自慰后通常需要清理或休息）。\n"
@@ -122,6 +122,21 @@ class LivelyState(Star):
             else:
                 report = f"未提供新的状态数据，状态未更新。原因：{reason}"
         return report
+
+    def _extract_json_block(self, text: str) -> Optional[str]:
+        stripped = text.strip()
+        if not stripped:
+            return None
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            if len(lines) >= 3 and lines[-1].startswith("```"):
+                return "\n".join(lines[1:-1]).strip()
+            if stripped.startswith("```json"):
+                return "\n".join(lines[1:-1]).strip()
+            return None
+        if stripped[0] in "[{" and stripped[-1] in "]}":
+            return stripped
+        return None
 
     async def send_prompt(self,event: AstrMessageEvent,prompt: str) -> str:
         #获取UID
