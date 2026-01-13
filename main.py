@@ -129,7 +129,7 @@ class LivelyState(Star):
             "## Character State Assessment Task\n\n"
             "### Current Context\n"
             f"- User Latest Message: {cur_msg}\n"
-            f"- Current User: {event.get_unified_msg_origin()}\n"
+            f"- Current User: {event.get_unified_msg_origin}\n"
             f"- Current State Target ID: {target_id} (who this state is associated with; 'none' means global)\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
             "### Character Current State\n"
