@@ -6,6 +6,7 @@ from astrbot.api import logger
 from astrbot.api.provider import ProviderRequest
 from typing import Any, Dict, List, Optional, Tuple
 from astrbot.api.event import MessageChain
+import json_repair
 class CharacterState:
     def __init__(self):
         self.LastUpdateTime = time.time()
@@ -112,7 +113,14 @@ class LivelyState(Star):
         return template
 
     def _handle_apply(self, event, payload_text: str) -> str:
-        payload_text = payload_text.strip()
+        try:
+            # 它能自动修好 90% 的弱智错误（比如没闭合的括号、多余逗号）
+            clean_json = json_repair.loads(payload_text) 
+            logger.info("解析成功！", clean_json)
+        except Exception as e:
+            print("这模型没救了，重试吧", e)
+            payload_text = payload_text.strip()
+
         if not payload_text:
             return "请提供大模型返回的 JSON 内容。"
 
