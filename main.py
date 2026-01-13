@@ -47,7 +47,9 @@ class LivelyState(Star):
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
         state_prompt = self._handle_prompt(event)
+        logger.info("状态提示词创建完毕")
         llm_response = await self.send_prompt(event, state_prompt)
+        logger.info(f"状态提示词发送完毕，收到回复\n{llm_response}")
         report = self._handle_apply(event, llm_response)
         logger.info("状态更新报告: %s", report)
         state_prompt = f"这是你当前的状态信息：{self.global_state.get_whole_state()}\n请结合当前状态进行符合条件的回复。"
