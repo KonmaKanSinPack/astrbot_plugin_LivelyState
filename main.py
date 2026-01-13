@@ -118,7 +118,7 @@ class LivelyState(Star):
             clean_json = json_repair.loads(payload_text) 
             logger.info("解析成功！", clean_json)
         except Exception as e:
-            print("这模型没救了，重试吧", e)
+            logger.info("这模型没救了，重试吧", e)
             payload_text = payload_text.strip()
 
         if not payload_text:
