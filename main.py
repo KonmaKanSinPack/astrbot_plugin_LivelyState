@@ -5,6 +5,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.provider import ProviderRequest
 from typing import Any, Dict, List, Optional, Tuple
+from astrbot.api.event import MessageChain
 class CharacterState:
     def __init__(self):
         self.LastUpdateTime = time.time()
@@ -46,7 +47,8 @@ class LivelyState(Star):
 
     @filter.command("state_check")
     async def state_check(self, event: AstrMessageEvent) -> MessageEventResult:
-        await self.context.send_message(event.unified_msg_origin, f"当前状态信息：{self.global_state.get_whole_state()}")
+        await self.context.send_message(event.unified_msg_origin, MessageChain().message(f"当前状态信息：{self.global_state.get_whole_state()}"))
+        event.stop_event()
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
