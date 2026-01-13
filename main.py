@@ -121,17 +121,15 @@ class LivelyState(Star):
             return "未能解析 JSON，请直接粘贴模型输出或 ```json ``` 代码块。"
 
         try:
-            # 它能自动修好 90% 的弱智错误（比如没闭合的括号、多余逗号）
-            json_text = json_repair.loads(json_text) 
-            logger.info("解析成功！", json_text)
+            # json_repair.loads() returns parsed object directly (dict/list)
+            operations = json_repair.loads(json_text)
+            logger.info("JSON parsed successfully: %s", operations)
         except Exception as e:
-            logger.info("这模型没救了，重试吧", e)
-            json_text = json_text.strip()
-
-        try:
-            operations = json.loads(json_text)
-        except json.JSONDecodeError as exc:
-            return f"JSON 解析失败: {exc}"
+            logger.warning("JSON repair failed, fallback to standard parser: %s", e)
+            try:
+                operations = json.loads(json_text.strip())
+            except json.JSONDecodeError as exc:
+                return f"JSON parsing failed: {exc}"
 
         uid = event.unified_msg_origin
 
