@@ -54,6 +54,7 @@ class LivelyState(Star):
         logger.info("状态更新报告: %s", report)
         state_prompt = f"这是你当前的状态信息：{self.global_state.get_whole_state()}\n请结合当前状态进行符合条件的回复。"
         req.system_prompt += "\n" + state_prompt
+        logger.info(f"当前的系统提示词:{req.system_prompt}")
 
     def _handle_prompt(self, event: AstrMessageEvent) -> str:
         # if not conversation:
