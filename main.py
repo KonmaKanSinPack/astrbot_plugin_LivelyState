@@ -23,11 +23,13 @@ class CharacterState:
         }
 
     def get_whole_state(self):
-        if self.path.exists():
+        if not self.path.exists():
+            # File doesn't exist, create with default state
             state = self.default_state()
             self.save(state)
-            return self.default_state()
+            return state
         else:
+            # File exists, read it
             try:
                 state = json_repair.loads(self.path.read_text(encoding="utf-8"))
                 return state
@@ -158,7 +160,7 @@ class LivelyState(Star):
             new_state_data = operations.get("whole_state", {})
             if new_state_data:
                 self.global_state.save(new_state_data)
-                logger.info("查看新数据：{}",new_state_data)
+                logger.info(f"查看新数据：{new_state_data}")
                 report = f"状态已更新，原因：{reason}，状态：{self.global_state.get_whole_state()}"
             else:
                 report = f"未提供新的状态数据，状态未更新。原因：{reason}"
