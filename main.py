@@ -121,6 +121,8 @@ class LivelyState(Star):
                 report = f"状态已更新，原因：{reason}，状态：{self.global_state.get_whole_state()}"
             else:
                 report = f"未提供新的状态数据，状态未更新。原因：{reason}"
+        else:
+            report = f"无需更新状态。原因：{reason}"
         return report
 
     def _extract_json_block(self, text: str) -> Optional[str]:
