@@ -74,7 +74,8 @@ class LivelyState(Star):
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
-        
+        uid = event.unified_msg_origin
+
         state_prompt = self._handle_prompt(event)
         # logger.info("状态提示词创建完毕")
         llm_response = await self.send_prompt(event, state_prompt)
@@ -82,13 +83,21 @@ class LivelyState(Star):
         report = self._handle_apply(event, llm_response)
         logger.info("State update report: %s", report)
         state_info = self.global_state.get_whole_state()
+        target_id = state_info.get("target_id", "none")
+        if target_id == "none":
+            target_note = "This state is global (not tied to any specific user)."
+        elif target_id == uid:
+            target_note = f"This state is tied to YOU (user {target_id})."
+        else:
+            target_note = f"This state is tied to ANOTHER user ({target_id}); maintain consistency with that context."
         state_prompt = (
             f"\n## Character State Constraints [MANDATORY]\n\n"
             f"**Current Physical State**: {state_info['State']}\n"
             f"**Emotional State**: {state_info['Emotion']}\n"
             f"**Energy Level**: {state_info['Energy']}/100 | **Desire Level**: {state_info['Thirst']}/100\n"
-            f"**Target ID**: {state_info.get('target_id', 'none')} (who this state is associated with; 'none' means global)\n"
-            f"**Last State Update Reason**: {state_info.get('update_reason', 'unspecified')}\n\n"
+            f"**Target ID**: {target_id} (who this state is associated with; 'none' means global)\n"
+            f"**Last State Update Reason**: {state_info.get('update_reason', 'unspecified')}\n"
+            f"**Association Note**: {target_note}\n\n"
             f"### Response Requirements:\n"
             f"1. **Your response MUST reflect the current state** ({state_info['State']})\n"
             f"2. If state is physical activity (Running, Bathing, Cooking, etc.):\n"
@@ -120,7 +129,7 @@ class LivelyState(Star):
             "## Character State Assessment Task\n\n"
             "### Current Context\n"
             f"- User Latest Message: {cur_msg}\n"
-            f"- Current State: {current_state}\n"
+            f"- Current User: {event.get_unified_msg_origin()}\n"
             f"- Current State Target ID: {target_id} (who this state is associated with; 'none' means global)\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
             "### Character Current State\n"
@@ -210,7 +219,7 @@ class LivelyState(Star):
 
         do_update = operations.get("summary", {}).get("do_update", False)
         reason = operations.get("summary", {}).get("update_reason", "无理由说明。")
-        target_id = operations.get("summary", {}).get("target_id", "none")
+        target_id = operations.get("summary", {}).get("target_id") or "none"
         
         if do_update:
             new_state_data = operations.get("whole_state", {})
