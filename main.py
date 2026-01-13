@@ -19,7 +19,8 @@ class CharacterState:
             "Emotion": "Normal",
             "Energy": 100,
             "Thirst": 0,
-            "State": "Idle"
+            "State": "Idle",
+            "update_reason": "Initial state"  
         }
 
     def get_whole_state(self):
@@ -81,10 +82,21 @@ class LivelyState(Star):
         logger.info("State update report: %s", report)
         state_info = self.global_state.get_whole_state()
         state_prompt = (
-            f"\n## Character State Constraints\n"
-            f"**Current State**: {state_info['State']}\n"
-            f"**Emotion**: {state_info['Emotion']} | **Energy**: {state_info['Energy']}/100 | **Desire**: {state_info['Thirst']}/100\n"
-            f"Consider the above state factors when responding. Ensure your response is consistent with the character's current state."
+            f"\n## Character State Constraints [MANDATORY]\n\n"
+            f"**Current Physical State**: {state_info['State']}\n"
+            f"**Emotional State**: {state_info['Emotion']}\n"
+            f"**Energy Level**: {state_info['Energy']}/100 | **Desire Level**: {state_info['Thirst']}/100\n"
+            f"**Last State Update Reason**: {state_info['update_reason']}\n\n"
+            f"### Response Requirements:\n"
+            f"1. **Your response MUST reflect the current state** ({state_info['State']})\n"
+            f"2. If state is physical activity (Running, Bathing, Cooking, etc.):\n"
+            f"   - Response should indicate you are CURRENTLY doing this activity\n"
+            f"   - You can chat while doing it, but acknowledge the activity\n"
+            f"   - Example: If Running → mention being out of breath, checking phone while running, etc.\n"
+            f"3. If energy is low (<30), show fatigue in your response\n"
+            f"4. Emotion ({state_info['Emotion']}) should be reflected in your tone\n"
+            f"5. **NEVER pretend to be in a different state than specified above**\n\n"
+            f"The state information is GROUND TRUTH - your response must align with it."
         )
         logger.info(f"当前状态信息:{state_prompt}")
         req.system_prompt += state_prompt
@@ -147,7 +159,6 @@ class LivelyState(Star):
             "{\n"
             "  \"summary\": {\n"
             "    \"do_update\": true/false,\n"
-            "    \"update_reason\": \"Explain based on TIME ELAPSED and OBJECTIVE REALITY, not just user message\"\n"
             "  },\n"
             "  \"whole_state\": {\n"
             "    \"LastUpdateTime\": <current_timestamp>,\n"
@@ -155,6 +166,7 @@ class LivelyState(Star):
             "    \"Energy\": <0-100>,\n"
             "    \"Thirst\": <0-100>,\n"
             "    \"State\": \"new state (only if justified by time/logic)\"\n"
+            "    \"update_reason\": \"Explain based on TIME ELAPSED and OBJECTIVE REALITY, not just user message\"\n"
             "  }\n"
             "}\n\n"
             "**IMPORTANT**:\n"
