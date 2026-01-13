@@ -20,7 +20,8 @@ class CharacterState:
             "Energy": 100,
             "Thirst": 0,
             "State": "Idle",
-            "update_reason": "Initial state"  
+            "update_reason": "Initial state",
+            "target_id": "none",
         }
 
     def get_whole_state(self):
@@ -86,7 +87,8 @@ class LivelyState(Star):
             f"**Current Physical State**: {state_info['State']}\n"
             f"**Emotional State**: {state_info['Emotion']}\n"
             f"**Energy Level**: {state_info['Energy']}/100 | **Desire Level**: {state_info['Thirst']}/100\n"
-            f"**Last State Update Reason**: {state_info['update_reason']}\n\n"
+            f"**Target ID**: {state_info.get('target_id', 'none')} (who this state is associated with; 'none' means global)\n"
+            f"**Last State Update Reason**: {state_info.get('update_reason', 'unspecified')}\n\n"
             f"### Response Requirements:\n"
             f"1. **Your response MUST reflect the current state** ({state_info['State']})\n"
             f"2. If state is physical activity (Running, Bathing, Cooking, etc.):\n"
@@ -95,7 +97,8 @@ class LivelyState(Star):
             f"   - Example: If Running → mention being out of breath, checking phone while running, etc.\n"
             f"3. If energy is low (<30), show fatigue in your response\n"
             f"4. Emotion ({state_info['Emotion']}) should be reflected in your tone\n"
-            f"5. **NEVER pretend to be in a different state than specified above**\n\n"
+            f"5. **NEVER pretend to be in a different state than specified above**\n"
+            f"6. State origin stays consistent across users: if now Resting because just finished Running, say that to ANY user.\n\n"
             f"The state information is GROUND TRUTH - your response must align with it."
         )
         logger.info(f"当前状态信息:{state_prompt}")
@@ -111,12 +114,14 @@ class LivelyState(Star):
         state_info = self.global_state.get_whole_state()
         time_elapsed = time.time() - state_info["LastUpdateTime"]
         current_state = state_info["State"]
+        target_id = state_info.get("target_id", "none")
         
         template = (
             "## Character State Assessment Task\n\n"
             "### Current Context\n"
             f"- User Latest Message: {cur_msg}\n"
             f"- Current State: {current_state}\n"
+            f"- Current State Target ID: {target_id} (who this state is associated with; 'none' means global)\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
             "### Character Current State\n"
             f"{json.dumps(state_info, ensure_ascii=False, indent=2)}\n\n"
@@ -159,14 +164,16 @@ class LivelyState(Star):
             "{\n"
             "  \"summary\": {\n"
             "    \"do_update\": true/false,\n"
+            "    \"target_id\": \"user_id this state relates to; use 'none' if not tied to a specific user\"\n"
             "  },\n"
             "  \"whole_state\": {\n"
             "    \"LastUpdateTime\": <current_timestamp>,\n"
             "    \"Emotion\": \"emotional state\",\n"
             "    \"Energy\": <0-100>,\n"
             "    \"Thirst\": <0-100>,\n"
-            "    \"State\": \"new state (only if justified by time/logic)\"\n"
-            "    \"update_reason\": \"Explain based on TIME ELAPSED and OBJECTIVE REALITY, not just user message\"\n"
+            "    \"State\": \"new state (only if justified by time/logic)\",\n"
+            "    \"update_reason\": \"Explain based on TIME ELAPSED and OBJECTIVE REALITY, consistent across all users\",\n"
+            "    \"target_id\": \"copy from summary.target_id or 'none' if not user-specific\"\n"
             "  }\n"
             "}\n\n"
             "**IMPORTANT**:\n"
@@ -203,10 +210,16 @@ class LivelyState(Star):
 
         do_update = operations.get("summary", {}).get("do_update", False)
         reason = operations.get("summary", {}).get("update_reason", "无理由说明。")
+        target_id = operations.get("summary", {}).get("target_id", "none")
         
         if do_update:
             new_state_data = operations.get("whole_state", {})
             if new_state_data:
+                # Ensure required fields exist and are normalized
+                new_state_data.setdefault("LastUpdateTime", time.time())
+                new_state_data.setdefault("target_id", target_id)
+                new_state_data.setdefault("update_reason", reason)
+                # Persist state
                 self.global_state.save(new_state_data)
                 logger.info(f"查看新数据：{new_state_data}")
                 report = f"状态已更新，原因：{reason}，状态：{self.global_state.get_whole_state()}"
