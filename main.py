@@ -115,8 +115,8 @@ class LivelyState(Star):
     def _handle_apply(self, event, payload_text: str) -> str:
         try:
             # 它能自动修好 90% 的弱智错误（比如没闭合的括号、多余逗号）
-            clean_json = json_repair.loads(payload_text) 
-            logger.info("解析成功！", clean_json)
+            payload_text = json_repair.loads(payload_text) 
+            logger.info("解析成功！", payload_text)
         except Exception as e:
             logger.info("这模型没救了，重试吧", e)
             payload_text = payload_text.strip()
