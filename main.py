@@ -6,23 +6,40 @@ from astrbot.api import logger
 from astrbot.api.provider import ProviderRequest
 from typing import Any, Dict, List, Optional, Tuple
 from astrbot.api.event import MessageChain
+from astrbot.api.star import StarTools
 import json_repair
 class CharacterState:
     def __init__(self):
-        self.LastUpdateTime = time.time()
-        self.Emotion = "Normal"
-        self.Energy = 100
-        self.Thirst = 0
-        self.State = "Idle"
+        self.path = StarTools.get_data_dir() / f"global_state.json"
+
     
-    def get_whole_state(self):
+    def default_state(self) -> Dict[str, Any]:
         return {
-            "LastUpdateTime": self.LastUpdateTime,
-            "Emotion": self.Emotion,
-            "Energy": self.Energy,
-            "Thirst": self.Thirst,
-            "State": self.State
+            "LastUpdateTime": time.time(),
+            "Emotion": "Normal",
+            "Energy": 100,
+            "Thirst": 0,
+            "State": "Idle"
         }
+
+    def get_whole_state(self):
+        if self.path.exists():
+            state = self.default_state()
+            self.save(state)
+            return self.default_state()
+        else:
+            try:
+                state = json_repair.loads(self.path.read_text(encoding="utf-8"))
+                return state
+            except Exception as e:
+                logger.error(f"Failed to parse state file, using default state. Error: {e}")
+                state = self.default_state()
+                self.save(state)
+                return state
+
+    def save(self,state):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
 
     def update(self, current_time, enable_update=True):
         # 更新角色状态的逻辑
@@ -67,6 +84,7 @@ class LivelyState(Star):
             f"**Emotion**: {state_info['Emotion']} | **Energy**: {state_info['Energy']}/100 | **Desire**: {state_info['Thirst']}/100\n"
             f"Consider the above state factors when responding. Ensure your response is consistent with the character's current state."
         )
+        logger.info(f"当前状态信息:{state_prompt}")
         req.system_prompt += state_prompt
         # logger.info(f"Current system prompt: {req.system_prompt}")
 
@@ -77,7 +95,6 @@ class LivelyState(Star):
 
         cur_msg = event.message_str
         time_elapsed = time.time() - self.global_state.LastUpdateTime
-        current_time = time.time()
         
         template = (
             "## Character State Assessment Task\n\n"
@@ -139,11 +156,7 @@ class LivelyState(Star):
         if do_update:
             new_state_data = operations.get("whole_state", {})
             if new_state_data:
-                self.global_state.Emotion = new_state_data.get("Emotion", self.global_state.Emotion)
-                self.global_state.Energy = new_state_data.get("Energy", self.global_state.Energy)
-                self.global_state.Thirst = new_state_data.get("Thirst", self.global_state.Thirst)
-                self.global_state.State = new_state_data.get("State", self.global_state.State)
-                self.global_state.LastUpdateTime = time.time()
+                self.global_state.save(new_state_data)
                 report = f"状态已更新，原因：{reason}，状态：{self.global_state.get_whole_state()}"
             else:
                 report = f"未提供新的状态数据，状态未更新。原因：{reason}"
