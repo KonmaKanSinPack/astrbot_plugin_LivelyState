@@ -120,6 +120,7 @@ class LivelyState(Star):
         logger.info("Creating state prompt, operator: %s", event.get_sender_name())
 
         cur_msg = event.message_str
+        uid = event.unified_msg_origin
         state_info = self.global_state.get_whole_state()
         time_elapsed = time.time() - state_info["LastUpdateTime"]
         current_state = state_info["State"]
@@ -129,7 +130,7 @@ class LivelyState(Star):
             "## Character State Assessment Task\n\n"
             "### Current Context\n"
             f"- User Latest Message: {cur_msg}\n"
-            f"- Current User: {event.unified_msg_origin}\n"
+            f"- Current User ID: {uid}\n"
             f"- Current State Target ID: {target_id} (who this state is associated with; 'none' means global)\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
             "### Character Current State\n"
@@ -173,7 +174,7 @@ class LivelyState(Star):
             "{\n"
             "  \"summary\": {\n"
             "    \"do_update\": true/false,\n"
-            "    \"target_id\": \"user_id this state relates to; use 'none' if not tied to a specific user\"\n"
+            f"    \"target_id\": \"If state relates to current user, use '{uid}'; use 'none' for global state; use other user_id if relates to another user\"\n"
             "  },\n"
             "  \"whole_state\": {\n"
             "    \"LastUpdateTime\": <current_timestamp>,\n"
@@ -182,7 +183,7 @@ class LivelyState(Star):
             "    \"Thirst\": <0-100>,\n"
             "    \"State\": \"new state (only if justified by time/logic)\",\n"
             "    \"update_reason\": \"Explain based on TIME ELAPSED and OBJECTIVE REALITY, consistent across all users\",\n"
-            "    \"target_id\": \"copy from summary.target_id or 'none' if not user-specific\"\n"
+            f"    \"target_id\": \"Same as summary.target_id - use '{uid}' for current user, 'none' for global, or specific user_id\"\n"
             "  }\n"
             "}\n\n"
             "**IMPORTANT**:\n"
