@@ -43,7 +43,7 @@ class CharacterState:
 
     def update(self, current_time, enable_update=True):
         # 更新角色状态的逻辑
-        self.LastUpdateTime = current_time
+        # self.LastUpdateTime = current_time
         # 这里可以添加更多的状态更新逻辑
         if enable_update:
             pass
@@ -94,13 +94,13 @@ class LivelyState(Star):
         logger.info("Creating state prompt, operator: %s", event.get_sender_name())
 
         cur_msg = event.message_str
-        time_elapsed = time.time() - self.global_state.LastUpdateTime
+        state_info = self.global_state.get_whole_state()
+        time_elapsed = time.time() -state_info["LastUpdateTime"]
         
         template = (
             "## Character State Assessment Task\n\n"
             "### Current Context\n"
             f"- User Latest Message: {cur_msg}\n"
-            f"- Previous State: {self.global_state.State}\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
             "### Character Current State\n"
             f"{json.dumps(self.global_state.get_whole_state(), ensure_ascii=False, indent=2)}\n\n"
