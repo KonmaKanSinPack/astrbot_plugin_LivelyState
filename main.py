@@ -118,6 +118,7 @@ class LivelyState(Star):
             "    \"update_reason\": \"Brief explanation of whether state needs update and why\"\n"
             "  },\n"
             "  \"whole_state\": {\n"
+            "    \"LastUpdateTime\": <timestamp>,\n"
             "    \"Emotion\": \"current mood\",\n"
             "    \"Energy\": <0-100>,\n"
             "    \"Thirst\": <0-100>,\n"
@@ -157,6 +158,7 @@ class LivelyState(Star):
             new_state_data = operations.get("whole_state", {})
             if new_state_data:
                 self.global_state.save(new_state_data)
+                logger.info("查看新数据：{}",new_state_data)
                 report = f"状态已更新，原因：{reason}，状态：{self.global_state.get_whole_state()}"
             else:
                 report = f"未提供新的状态数据，状态未更新。原因：{reason}"
