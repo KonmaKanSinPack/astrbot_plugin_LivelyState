@@ -272,6 +272,8 @@ class LivelyState(Star):
         sys_msg = f"{person_prompt}"
         provider = self.context.get_using_provider()
         logger.info(f"当前提供商：{provider}")
+        logger.info(f"获取会话的配置文件{self.context.astrbot_config_mgr.get_conf(uid)}")
+        logger.info(f"获取提供商配置{self.context.astrbot_config_mgr.g(uid, "provider_settings")}")
         llm_resp = await provider.text_chat(
                 prompt=prompt,
                 session_id=None,
