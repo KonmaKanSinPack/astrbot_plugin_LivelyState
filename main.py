@@ -112,7 +112,7 @@ class LivelyState(Star):
             f"The state information is GROUND TRUTH - your response must align with it."
         )
         # logger.info(f"当前状态信息:{state_prompt}")
-        req.system_prompt += state_prompt
+        req.system_prompt = req.system_prompt + state_prompt
         logger.info(f"Current system prompt: {req.system_prompt}")
 
     def _handle_prompt(self, event: AstrMessageEvent) -> str:
