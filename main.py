@@ -111,9 +111,9 @@ class LivelyState(Star):
             f"6. State origin stays consistent across users: if now Resting because just finished Running, say that to ANY user.\n\n"
             f"The state information is GROUND TRUTH - your response must align with it."
         )
-        logger.info(f"当前状态信息:{state_prompt}")
+        # logger.info(f"当前状态信息:{state_prompt}")
         req.system_prompt += state_prompt
-        # logger.info(f"Current system prompt: {req.system_prompt}")
+        logger.info(f"Current system prompt: {req.system_prompt}")
 
     def _handle_prompt(self, event: AstrMessageEvent) -> str:
         # if not conversation:
@@ -271,6 +271,7 @@ class LivelyState(Star):
         #发送信息到llm
         sys_msg = f"{person_prompt}"
         provider = self.context.get_using_provider()
+        logger.info(f"当前提供商：{provider}")
         llm_resp = await provider.text_chat(
                 prompt=prompt,
                 session_id=None,
