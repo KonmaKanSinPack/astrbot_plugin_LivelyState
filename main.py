@@ -79,7 +79,7 @@ class LivelyState(Star):
         state_prompt = self._handle_prompt(event)
 
         ori_system_prompt = req.system_prompt or ""
-        logger.info(f"原系统提示词_LivelyState:{ori_system_prompt}")
+        # logger.info(f"原系统提示词_LivelyState:{ori_system_prompt}")
 
         llm_response = await self.send_prompt(event, state_prompt)
         # logger.info(f"状态提示词发送完毕，收到回复\n{llm_response}")
