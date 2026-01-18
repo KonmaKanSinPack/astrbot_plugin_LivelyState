@@ -77,7 +77,10 @@ class LivelyState(Star):
         uid = event.unified_msg_origin
 
         state_prompt = self._handle_prompt(event)
-        # logger.info("状态提示词创建完毕")
+
+        ori_system_prompt = req.system_prompt or ""
+        logger.info(f"原系统提示词_LivelyState:{ori_system_prompt}")
+
         llm_response = await self.send_prompt(event, state_prompt)
         # logger.info(f"状态提示词发送完毕，收到回复\n{llm_response}")
         report = self._handle_apply(event, llm_response)
@@ -112,8 +115,8 @@ class LivelyState(Star):
             f"The state information is GROUND TRUTH - your response must align with it."
         )
         # logger.info(f"当前状态信息:{state_prompt}")
-        req.system_prompt = req.system_prompt + state_prompt
-        logger.info(f"Current system prompt: {req.system_prompt}")
+        req.system_prompt = ori_system_prompt + state_prompt
+        logger.info(f"当前系统提示词——LivelyState: {req.system_prompt}")
 
     def _handle_prompt(self, event: AstrMessageEvent) -> str:
         # if not conversation:
