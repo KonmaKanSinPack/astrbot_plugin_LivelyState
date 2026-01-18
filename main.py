@@ -73,7 +73,7 @@ class LivelyState(Star):
         event.stop_event()
 
     @filter.on_llm_request()
-    async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
+    async def add_state(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
         uid = event.unified_msg_origin
 
         state_prompt = self._handle_prompt(event)
