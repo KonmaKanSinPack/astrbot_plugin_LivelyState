@@ -76,7 +76,7 @@ async def change_current_state(self, event: AstrMessageEvent,
                                State: str,
                                update_reason: str,
                                target_id: str) -> MessageEventResult:
-    '''更改当前角色状态。
+    '''Change your current state. This tool is designed to be called by the LLM when it determines that a state change is necessary based on time progression and physical reality, not just user messages.
 
     Args:
         Emotion (str): Your current emotional state
