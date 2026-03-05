@@ -65,42 +65,6 @@ class CharacterState:
 #     def __init__(self):
 #         self.character_states =    
 
-@filter.llm_tool(name="change_current_state") 
-async def change_current_state(self, event: AstrMessageEvent, 
-                               Emotion: Optional[str] = None,
-                               Energy: Optional[int] = None,
-                               Thirst: Optional[int] = None,
-                               State: Optional[str] = None,
-                               update_reason: Optional[str] = None,
-                               target_id: Optional[str] = None) -> MessageEventResult:
-
-    '''Change your current state. This tool is designed to be called by the LLM when it determines that a state change is necessary based on time progression and physical reality, not just user messages.
-
-    Args:
-        Emotion (str): Your current emotional state
-        Energy (int): Your current energy level
-        Thirst (int): Your current thirst level
-        State (str): Your current physical state
-        update_reason (str): The reason for the state update
-        target_id (str): The target ID (if the state is related to the current user, use their UID; if it's a global state, use 'none'; if it's related to another user, use their specific UID)
-    '''
-    cur_state = {
-        "LastUpdateTime": time.time(),
-        "Emotion": Emotion,
-        "Energy": Energy,
-        "Thirst": Thirst,
-        "State": State,
-        "update_reason": update_reason,
-        "target_id": target_id,
-    }
-    report = self._handle_apply(event, cur_state)
-    logger.info("State update report: %s", report)
-    if report.startswith("Update Failed"):
-        # await event.send(event.plain_result(report))
-        return report
-    else:
-        # await event.send(event.plain_result("Update successful: " + report))
-        return report
 
 @register("LivelyState", "兔子", "这是一个让角色拥有持续状态记忆的拟人插件：不再每句“重开存档”，而是带着上一刻的心情继续和你说话。", "v1.0.0")
 class LivelyState(Star):
@@ -112,6 +76,44 @@ class LivelyState(Star):
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+
+    @filter.llm_tool(name="change_current_state") 
+    async def change_current_state(self, event: AstrMessageEvent, 
+                                Emotion: Optional[str] = None,
+                                Energy: Optional[int] = None,
+                                Thirst: Optional[int] = None,
+                                State: Optional[str] = None,
+                                update_reason: Optional[str] = None,
+                                target_id: Optional[str] = None) -> MessageEventResult:
+
+        '''Change your current state. This tool is designed to be called by the LLM when it determines that a state change is necessary based on time progression and physical reality, not just user messages.
+
+        Args:
+            Emotion (str): Your current emotional state
+            Energy (int): Your current energy level
+            Thirst (int): Your current thirst level
+            State (str): Your current physical state
+            update_reason (str): The reason for the state update
+            target_id (str): The target ID (if the state is related to the current user, use their UID; if it's a global state, use 'none'; if it's related to another user, use their specific UID)
+        '''
+        cur_state = {
+            "LastUpdateTime": time.time(),
+            "Emotion": Emotion,
+            "Energy": Energy,
+            "Thirst": Thirst,
+            "State": State,
+            "update_reason": update_reason,
+            "target_id": target_id,
+        }
+        report = self._handle_apply(event, cur_state)
+        logger.info("State update report: %s", report)
+        if report.startswith("Update Failed"):
+            # await event.send(event.plain_result(report))
+            return report
+        else:
+            # await event.send(event.plain_result("Update successful: " + report))
+            return report
+
 
     @filter.command("state_check")
     async def state_check(self, event: AstrMessageEvent) -> MessageEventResult:
