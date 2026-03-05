@@ -27,7 +27,6 @@ class CharacterState:
             "LastUpdateTime": time.time(),
             "Emotion": "Normal",
             "Energy": 100,
-            "Thirst": 0,
             "State": "Idle",
             "update_reason": "Initial state",
             "target_id": "none",
@@ -81,13 +80,11 @@ class LivelyState(Star):
     async def change_current_state(self, event: AstrMessageEvent, 
                                 Emotion: Optional[str] = None,
                                 Energy: Optional[int] = None,
-                                Thirst: Optional[int] = None,
                                 State: Optional[str] = None,
                                 update_reason: Optional[str] = None,
                                 target_id: Optional[str] = None,
                                 emotional_state: Optional[str] = None,
                                 energy_level: Optional[int] = None,
-                                thirst_level: Optional[int] = None,
                                 physical_state: Optional[str] = None) -> MessageEventResult:
 
         '''Update persistent character state.
@@ -96,7 +93,7 @@ class LivelyState(Star):
         - 用户明确要求你改变当前行为/状态（如休息、睡觉、停止跑步、开始做饭等）：调用本工具
         - 你准备回复的内容与当前 State/Emotion/Energy 明显冲突：先调用本工具再回复
         - 距离上次更新已过较长时间，当前活动按常理应自然结束或转场：调用本工具
-        - 持续活动或时间流逝导致 Energy/Thirst 应发生变化：调用本工具
+        - 持续活动或时间流逝导致 Energy 应发生变化：调用本工具
 
         Partial updates are allowed: only provide changed fields.
         Omitted fields will keep previous values.
@@ -104,13 +101,11 @@ class LivelyState(Star):
         Args:
             Emotion (str, optional): Emotional state text.
             Energy (int, optional): Energy in range 0-100.
-            Thirst (int, optional): Thirst in range 0-100.
             State (str, optional): Physical/activity state text.
             update_reason (str, optional): Why this update is needed.
             target_id (str, optional): Related user id; use 'none' for global state.
             emotional_state (str, optional): Alias of Emotion.
             energy_level (int, optional): Alias of Energy.
-            thirst_level (int, optional): Alias of Thirst.
             physical_state (str, optional): Alias of State.
         '''
         
@@ -118,8 +113,6 @@ class LivelyState(Star):
             Emotion = emotional_state
         if Energy is None and energy_level is not None:
             Energy = energy_level
-        if Thirst is None and thirst_level is not None:
-            Thirst = thirst_level
         if State is None and physical_state is not None:
             State = physical_state
 
@@ -127,7 +120,6 @@ class LivelyState(Star):
             "LastUpdateTime": time.time(),
             "Emotion": Emotion,
             "Energy": Energy,
-            "Thirst": Thirst,
             "State": State,
             "update_reason": update_reason,
             "target_id": target_id,
@@ -174,7 +166,7 @@ class LivelyState(Star):
             f"**Latest User Message**: {event.message_str}\n"
             f"**Current Physical State**: {state_info['State']}\n"
             f"**Emotional State**: {state_info['Emotion']}\n"
-            f"**Energy Level**: {state_info['Energy']}/100 | **Thirst Level**: {state_info['Thirst']}/100\n"
+            f"**Energy Level**: {state_info['Energy']}/100\n"
             f"**Current User ID**: {uid}\n"
             f"**Target ID**: {target_id} (who this state is associated with; 'none' means global)\n"
             f"**Last State Update Reason**: {state_info.get('update_reason', 'unspecified')}\n"
@@ -192,11 +184,11 @@ class LivelyState(Star):
             f"- 用户明确要求你改变当前行为/状态（如休息、睡觉、停止跑步、开始做饭等）：调用本工具\n"
             f"- 你准备回复的内容与当前 State/Emotion/Energy 明显冲突：先调用本工具再回复\n"
             f"- 距离上次更新已过较长时间，当前活动按常理应自然结束或转场：调用本工具\n"
-            f"- 持续活动或时间流逝导致 Energy/Thirst 应发生变化：调用本工具\n\n"
+            f"- 持续活动或时间流逝导致 Energy 应发生变化：调用本工具\n\n"
             f"### 工具调用格式【严格】\n"
             f"- 只能使用原生工具调用（真实 function call），不能用普通文本假装调用。\n"
             f"- 严禁在回复正文输出伪标签，如 <execute_tool>...</execute_tool>。\n"
-            f"- 工具参数名必须使用以下字段：Emotion、Energy、Thirst、State、update_reason、target_id。\n\n"
+            f"- 工具参数名必须使用以下字段：Emotion、Energy、State、update_reason、target_id。\n\n"
             f"- 若未命中触发条件，则不要调用工具，并保持当前状态。\n"
             f"- 若调用工具，至少填写发生变化的字段和 update_reason；未填写字段将沿用旧值。\n\n"
             f"- 状态信息是事实基准（GROUND TRUTH），你的回复必须与其一致。"
@@ -282,8 +274,8 @@ class LivelyState(Star):
         uid = event.unified_msg_origin
         current_state = self.global_state.get_whole_state()
 
-        updatable_fields = ["Emotion", "Energy", "Thirst", "State", "update_reason", "target_id"]
-        required_numeric_fields = ["Energy", "Thirst"]
+        updatable_fields = ["Emotion", "Energy", "State", "update_reason", "target_id"]
+        required_numeric_fields = ["Energy"]
 
         if all(payload.get(field_name) is None for field_name in updatable_fields):
             return "Update Failed：至少需要提供一个可更新字段"
@@ -336,7 +328,6 @@ class LivelyState(Star):
             "LastUpdateTime": time.time(),
             "Emotion": _safe_text(payload.get("Emotion"), current_state.get("Emotion", "Normal")),
             "Energy": _clamp_int(payload.get("Energy"), _clamp_int(current_state.get("Energy"), 100)),
-            "Thirst": _clamp_int(payload.get("Thirst"), _clamp_int(current_state.get("Thirst"), 0)),
             "State": _safe_text(payload.get("State"), current_state.get("State", "Idle")),
             "update_reason": reason,
             "target_id": target_id,

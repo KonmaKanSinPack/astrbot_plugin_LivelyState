@@ -1,9 +1,9 @@
 # astrbot_plugin_LivelyState
 
-`LivelyState` 是一个 AstrBot 状态机插件，用于给角色增加“持续状态记忆”（如情绪、体力、口渴、当前行为），并在每次 LLM 请求时把状态注入系统提示词，约束角色回复更连贯、更符合“正在做什么”。
+`LivelyState` 是一个 AstrBot 状态机插件，用于给角色增加“持续状态记忆”（如情绪、体力、当前行为），并在每次 LLM 请求时把状态注入系统提示词，约束角色回复更连贯、更符合“正在做什么”。
 * 她不再每句“重开存档”，而是带着上一刻的心情继续和你说话。
 * 有情绪起伏、有体力变化、有当下状态——这次，她真的“活”起来了。
-* 不是台词机，而是会累、会渴、会心动的同伴，陪你把故事聊下去。
+* 不是台词机，而是会累、会心动的同伴，陪你把故事聊下去。
 
 ## 功能特性
 
@@ -18,7 +18,6 @@
 - `LastUpdateTime`：最近更新时间戳
 - `Emotion`：情绪
 - `Energy`：体力（0-100）
-- `Thirst`：口渴度（0-100）
 - `State`：当前行为状态
 - `update_reason`：状态更新原因
 - `target_id`：状态关联目标（`none` 表示全局）
@@ -30,7 +29,6 @@
 	"LastUpdateTime": 0,
 	"Emotion": "Normal",
 	"Energy": 100,
-	"Thirst": 0,
 	"State": "Idle",
 	"update_reason": "Initial state",
 	"target_id": "none"
@@ -71,7 +69,7 @@ state_check
 该工具需要以下字段：
 
 - 文本字段：`Emotion`、`State`、`update_reason`、`target_id`
-- 数值字段：`Energy`、`Thirst`（必须是 0-100 的整数）
+- 数值字段：`Energy`（必须是 0-100 的整数）
 
 当字段缺失或不合法时会返回 `Update Failed` 信息。
 
