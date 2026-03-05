@@ -159,7 +159,7 @@ class LivelyState(Star):
             f"5. You possess a persistent \"Emotional State\" that DOES NOT reset between interactions. You must simulate human-like **Emotional Inertia**. Your mood should transition gradually based on a \"Decay Function\" rather than instantaneous switching."
             f"6. State origin stays consistent across users: if now Resting because just finished Running, say that to ANY user.\n\n"
             f"The state information is GROUND TRUTH - your response must align with it."
-            f"If you need to update the state, use the /change_current_state tool with valid JSON output, but do NOT change state just to match conversation context. State changes must be justified by time progression and physical reality, not inferred from user messages."
+            f"If you need to update the state, use the /change_current_state tool with valid output, but do NOT change state just to match conversation context. State changes must be justified by time progression and physical reality, not inferred from user messages."
         )
         # logger.info(f"当前状态信息:{state_prompt}")
         req.system_prompt = ori_system_prompt + state_prompt
