@@ -7,7 +7,16 @@ from astrbot.api.provider import ProviderRequest
 from typing import Any, Dict, List, Optional, Tuple
 from astrbot.api.event import MessageChain
 from astrbot.api.star import StarTools
+
 import json_repair
+
+from pydantic import Field
+from pydantic.dataclasses import dataclass
+
+from astrbot.core.agent.run_context import ContextWrapper
+from astrbot.core.agent.tool import FunctionTool, ToolExecResult
+from astrbot.core.astr_agent_context import AstrAgentContext
+
 class CharacterState:
     def __init__(self):
         self.path = StarTools.get_data_dir() / f"global_state.json"
@@ -56,6 +65,40 @@ class CharacterState:
 #     def __init__(self):
 #         self.character_states =    
 
+
+
+
+@filter.llm_tool(name="change_current_state") 
+async def change_current_state(self, event: AstrMessageEvent, 
+                               Emotion: str,
+                               Energy: int,
+                               Thirst: int,
+                               State: str,
+                               update_reason: str,
+                               target_id: str) -> MessageEventResult:
+    '''更改当前角色状态。
+
+    Args:
+        Emotion (str): 情绪状态
+        Energy (int): 能量值
+        Thirst (int): 饥渴值
+        State (str): 当前状态
+        update_reason (str): 更新原因
+        target_id (str): 目标ID（如果状态与当前用户相关，使用该用户ID；如果是全局状态，使用'none'；如果与其他用户相关，使用具体的用户ID）
+    '''
+    cur_state = {
+        "LastUpdateTime": time.time(),
+        "Emotion": Emotion,
+        "Energy": Energy,
+        "Thirst": Thirst,
+        "State": State,
+        "update_reason": update_reason,
+        "target_id": target_id,
+    }
+    report = self._handle_apply(event, cur_state)
+    logger.info("State update report: %s", report)
+    yield event.plain_result("状态已更新。")
+
 @register("LivelyState", "兔子", "状态机", "0.0.1")
 class LivelyState(Star):
     def __init__(self, context: Context):
@@ -81,10 +124,10 @@ class LivelyState(Star):
         ori_system_prompt = req.system_prompt or ""
         # logger.info(f"原系统提示词_LivelyState:{ori_system_prompt}")
 
-        llm_response = await self.send_prompt(event, state_prompt)
+        # llm_response = await self.send_prompt(event, state_prompt)
         # logger.info(f"状态提示词发送完毕，收到回复\n{llm_response}")
-        report = self._handle_apply(event, llm_response)
-        logger.info("State update report: %s", report)
+        # report = self._handle_apply(event, llm_response)
+        # logger.info("State update report: %s", report)
         state_info = self.global_state.get_whole_state()
         target_id = state_info.get("target_id", "none")
         if target_id == "none":
@@ -113,6 +156,7 @@ class LivelyState(Star):
             f"5. You possess a persistent \"Emotional State\" that DOES NOT reset between interactions. You must simulate human-like **Emotional Inertia**. Your mood should transition gradually based on a \"Decay Function\" rather than instantaneous switching."
             f"6. State origin stays consistent across users: if now Resting because just finished Running, say that to ANY user.\n\n"
             f"The state information is GROUND TRUTH - your response must align with it."
+            f"If you need to update the state, use the /change_current_state tool with valid JSON output, but do NOT change state just to match conversation context. State changes must be justified by time progression and physical reality, not inferred from user messages."
         )
         # logger.info(f"当前状态信息:{state_prompt}")
         req.system_prompt = ori_system_prompt + state_prompt
@@ -222,25 +266,26 @@ class LivelyState(Star):
 
         uid = event.unified_msg_origin
 
-        do_update = operations.get("summary", {}).get("do_update", False)
-        reason = operations.get("summary", {}).get("update_reason", "无理由说明。")
-        target_id = operations.get("summary", {}).get("target_id") or "none"
+        reason = operations.get("update_reason", "无理由说明。")
+        target_id = operations.get("target_id") or "none"
         
-        if do_update:
-            new_state_data = operations.get("whole_state", {})
-            if new_state_data:
-                # Ensure required fields exist and are normalized
-                new_state_data.setdefault("LastUpdateTime", time.time())
-                new_state_data.setdefault("target_id", target_id)
-                new_state_data.setdefault("update_reason", reason)
-                # Persist state
-                self.global_state.save(new_state_data)
-                logger.info(f"查看新数据：{new_state_data}")
-                report = f"状态已更新，原因：{reason}，状态：{self.global_state.get_whole_state()}"
-            else:
-                report = f"未提供新的状态数据，状态未更新。原因：{reason}"
-        else:
-            report = f"无需更新状态。原因：{reason}"
+    
+        new_state_data = {
+            "LastUpdateTime": time.time(),
+            "Emotion": operations.get("Emotion", "Normal"),
+            "Energy": operations.get("Energy", 100),
+            "Thirst": operations.get("Thirst", 100),
+            "State": operations.get("State", "Idle"),
+            "update_reason": reason,
+            "target_id": target_id,
+        }
+            # Ensure required fields exist and are normalized
+            
+            # Persist state
+        self.global_state.save(new_state_data)
+        logger.info(f"查看新数据：{new_state_data}")
+        report = f"状态已更新，原因：{reason}，状态：{self.global_state.get_whole_state()}"
+        
         return report
 
     def _extract_json_block(self, text: str) -> Optional[str]:
@@ -263,7 +308,9 @@ class LivelyState(Star):
         uid = event.unified_msg_origin
 
         #获取人格
-        person_prompt = await self.get_persona_system_prompt(uid)
+        person_prompt = await self.context.persona_manager.get_default_persona_v3(uid)
+        if not person_prompt:
+            person_prompt = self.context.provider_manager.selected_default_persona["prompt"]
 
         #获取历史记录
         conver_mgr = self.context.conversation_manager
