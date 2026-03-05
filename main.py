@@ -92,11 +92,11 @@ class LivelyState(Star):
 
         '''Update persistent character state.
 
-        Call this tool BEFORE normal reply when state should change due to:
-        - explicit user request (e.g., sleep/rest/stop/start activity)
-        - intended reply would contradict current state/emotion/energy
-        - enough elapsed time for natural activity transition
-        - energy/thirst should evolve with time or ongoing activity
+        使用建议（给 LLM 的决策规则）：
+        - 用户明确要求你改变当前行为/状态（如休息、睡觉、停止跑步、开始做饭等）：调用本工具
+        - 你准备回复的内容与当前 State/Emotion/Energy 明显冲突：先调用本工具再回复
+        - 距离上次更新已过较长时间，当前活动按常理应自然结束或转场：调用本工具
+        - 持续活动或时间流逝导致 Energy/Thirst 应发生变化：调用本工具
 
         Partial updates are allowed: only provide changed fields.
         Omitted fields will keep previous values.
@@ -180,28 +180,26 @@ class LivelyState(Star):
             f"**Last State Update Reason**: {state_info.get('update_reason', 'unspecified')}\n"
             f"**Association Note**: {target_note}\n\n"
             f"### Response Workflow [MANDATORY]\n"
-            f"Step 1: Decide whether any trigger is true.\n"
-            f"Step 2: If any trigger is true, call tool `change_current_state` first.\n"
-            f"Step 3: Then produce normal reply consistent with latest state.\n\n"
-            f"### Reply Style Rules\n"
-            f"- Reply MUST reflect current State ({state_info['State']}) and Emotion ({state_info['Emotion']}).\n"
-            f"- If in physical activity, acknowledge you are still doing it while chatting.\n"
-            f"- If Energy < 30, show visible fatigue in tone and wording.\n"
-            f"- Keep emotional transition gradual (emotional inertia), avoid sudden mood jumps.\n"
-            f"- State origin stays consistent across users.\n\n"
-            f"### Tool-Call Policy [HIGH PRIORITY]\n"
-            f"You MUST call tool `change_current_state` BEFORE your normal reply when ANY trigger is true:\n"
-            f"- Trigger A: User explicitly asks/requests an action or status change (e.g., sleep, rest, stop running, start cooking).\n"
-            f"- Trigger B: Your intended reply would contradict current state/emotion/energy.\n"
-            f"- Trigger C: Enough time elapsed for natural transition from current activity.\n"
-            f"- Trigger D: Energy/Thirst should change due to elapsed time or ongoing activity.\n\n"
-            f"### Tool-Call Format [STRICT]\n"
-            f"- Use NATIVE tool calling only (actual function call), not plain text.\n"
-            f"- NEVER output fake tags like <execute_tool>...</execute_tool> in assistant text.\n"
-            f"- Tool args MUST use these exact names: Emotion, Energy, Thirst, State, update_reason, target_id.\n\n"
-            f"When no trigger is true, do NOT call tool and keep current state.\n"
-            f"If calling tool, include at least changed fields and `update_reason`; omitted fields will keep previous values.\n\n"
-            f"The state information is GROUND TRUTH - your response must align with it."
+            f"- 先判断是否需要更新状态；若需要，先调用工具，再进行正常回复。\n"
+            f"- 正常回复必须与最新状态一致。\n\n"
+            f"### 回复风格规则\n"
+            f"- 回复必须体现当前状态（{state_info['State']}）与情绪（{state_info['Emotion']}）。\n"
+            f"- 若处于进行中的体力活动，需在聊天中体现“仍在该活动中”。\n"
+            f"- 若 Energy < 30，语气和措辞需体现明显疲惫。\n"
+            f"- 情绪变化需渐进（情绪惯性），避免突然跳变。\n"
+            f"- 同一状态对所有用户保持一致，不因对象不同而自相矛盾。\n\n"
+            f"### 使用建议（给 LLM 的决策规则）\n"
+            f"- 用户明确要求你改变当前行为/状态（如休息、睡觉、停止跑步、开始做饭等）：调用本工具\n"
+            f"- 你准备回复的内容与当前 State/Emotion/Energy 明显冲突：先调用本工具再回复\n"
+            f"- 距离上次更新已过较长时间，当前活动按常理应自然结束或转场：调用本工具\n"
+            f"- 持续活动或时间流逝导致 Energy/Thirst 应发生变化：调用本工具\n\n"
+            f"### 工具调用格式【严格】\n"
+            f"- 只能使用原生工具调用（真实 function call），不能用普通文本假装调用。\n"
+            f"- 严禁在回复正文输出伪标签，如 <execute_tool>...</execute_tool>。\n"
+            f"- 工具参数名必须使用以下字段：Emotion、Energy、Thirst、State、update_reason、target_id。\n\n"
+            f"- 若未命中触发条件，则不要调用工具，并保持当前状态。\n"
+            f"- 若调用工具，至少填写发生变化的字段和 update_reason；未填写字段将沿用旧值。\n\n"
+            f"- 状态信息是事实基准（GROUND TRUTH），你的回复必须与其一致。"
         )
         # logger.info(f"当前状态信息:{state_prompt}")
         req.system_prompt = ori_system_prompt + state_prompt
