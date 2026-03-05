@@ -86,15 +86,24 @@ class LivelyState(Star):
                                 update_reason: Optional[str] = None,
                                 target_id: Optional[str] = None) -> MessageEventResult:
 
-        '''Change your current state. This tool is designed to be called by the LLM when it determines that a state change is necessary based on time progression and physical reality, not just user messages.
+        '''Update persistent character state.
+
+        Call this tool BEFORE normal reply when state should change due to:
+        - explicit user request (e.g., sleep/rest/stop/start activity)
+        - intended reply would contradict current state/emotion/energy
+        - enough elapsed time for natural activity transition
+        - energy/thirst should evolve with time or ongoing activity
+
+        Partial updates are allowed: only provide changed fields.
+        Omitted fields will keep previous values.
 
         Args:
-            Emotion (str): Your current emotional state
-            Energy (int): Your current energy level
-            Thirst (int): Your current thirst level
-            State (str): Your current physical state
-            update_reason (str): The reason for the state update
-            target_id (str): The target ID (if the state is related to the current user, use their UID; if it's a global state, use 'none'; if it's related to another user, use their specific UID)
+            Emotion (str, optional): Emotional state text.
+            Energy (int, optional): Energy in range 0-100.
+            Thirst (int, optional): Thirst in range 0-100.
+            State (str, optional): Physical/activity state text.
+            update_reason (str, optional): Why this update is needed.
+            target_id (str, optional): Related user id; use 'none' for global state.
         '''
         
 
