@@ -97,8 +97,10 @@ async def change_current_state(self, event: AstrMessageEvent,
     logger.info("State update report: %s", report)
     if report.startswith("Update Failed"):
         await event.send(event.plain_result(report))
+        return report
     else:
         await event.send(event.plain_result("Update successful: " + report))
+        return report
 
 @register("LivelyState", "兔子", "状态机", "0.0.1")
 class LivelyState(Star):
