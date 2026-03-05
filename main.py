@@ -133,6 +133,7 @@ class LivelyState(Star):
         # logger.info("State update report: %s", report)
         state_info = self.global_state.get_whole_state()
         target_id = state_info.get("target_id", "none")
+        time_elapsed = time.time() - state_info["LastUpdateTime"]
         if target_id == "none":
             target_note = "This state is global (not tied to any specific user)."
         elif target_id == uid:
@@ -141,6 +142,7 @@ class LivelyState(Star):
             target_note = f"This state is tied to ANOTHER user ({target_id}); maintain consistency with that context."
         state_prompt = (
             f"\n## Character State Constraints [MANDATORY]\n\n"
+            f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
             f"**Current Physical State**: {state_info['State']}\n"
             f"**Emotional State**: {state_info['Emotion']}\n"
             f"**Energy Level**: {state_info['Energy']}/100 | **Desire Level**: {state_info['Thirst']}/100\n"
