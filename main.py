@@ -245,37 +245,24 @@ class LivelyState(Star):
 
         return template
 
-    def _handle_apply(self, event, payload_text: str) -> str:
-        if not payload_text:
-            return "请提供大模型返回的 JSON 内容。"
+    def _handle_apply(self, event, payload: dict) -> str:
+        if not payload:
+            return "请提供大模型返回的 Dict 内容。"
 
-        json_text = self._extract_json_block(payload_text)
-        if json_text is None:
-            return "未能解析 JSON，请直接粘贴模型输出或 ```json ``` 代码块。"
-
-        try:
-            # json_repair.loads() returns parsed object directly (dict/list)
-            operations = json_repair.loads(json_text)
-            logger.info("JSON parsed successfully: %s", operations)
-        except Exception as e:
-            logger.warning("JSON repair failed, fallback to standard parser: %s", e)
-            try:
-                operations = json.loads(json_text.strip())
-            except json.JSONDecodeError as exc:
-                return f"JSON parsing failed: {exc}"
+        if not isinstance(payload, dict): return "状态更新数据必须是对象" 
 
         uid = event.unified_msg_origin
 
-        reason = operations.get("update_reason", "无理由说明。")
-        target_id = operations.get("target_id") or "none"
+        reason = payload.get("update_reason", "无理由说明。")
+        target_id = payload.get("target_id") or "none"
         
     
         new_state_data = {
             "LastUpdateTime": time.time(),
-            "Emotion": operations.get("Emotion", "Normal"),
-            "Energy": operations.get("Energy", 100),
-            "Thirst": operations.get("Thirst", 100),
-            "State": operations.get("State", "Idle"),
+            "Emotion": payload.get("Emotion", "Normal"),
+            "Energy": payload.get("Energy", 100),
+            "Thirst": payload.get("Thirst", 100),
+            "State": payload.get("State", "Idle"),
             "update_reason": reason,
             "target_id": target_id,
         }
