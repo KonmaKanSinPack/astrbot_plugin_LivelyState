@@ -96,6 +96,8 @@ class LivelyState(Star):
             update_reason (str): The reason for the state update
             target_id (str): The target ID (if the state is related to the current user, use their UID; if it's a global state, use 'none'; if it's related to another user, use their specific UID)
         '''
+        
+
         cur_state = {
             "LastUpdateTime": time.time(),
             "Emotion": Emotion,
@@ -144,6 +146,7 @@ class LivelyState(Star):
         state_prompt = (
             f"\n## Character State Constraints [MANDATORY]\n\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
+            f"**Latest User Message**: {event.message_str}\n"
             f"**Current Physical State**: {state_info['State']}\n"
             f"**Emotional State**: {state_info['Emotion']}\n"
             f"**Energy Level**: {state_info['Energy']}/100 | **Desire Level**: {state_info['Thirst']}/100\n"
@@ -161,8 +164,15 @@ class LivelyState(Star):
             f"4. Emotion ({state_info['Emotion']}) should be reflected in your tone\n"
             f"5. You possess a persistent \"Emotional State\" that DOES NOT reset between interactions. You must simulate human-like **Emotional Inertia**. Your mood should transition gradually based on a \"Decay Function\" rather than instantaneous switching."
             f"6. State origin stays consistent across users: if now Resting because just finished Running, say that to ANY user.\n\n"
+            f"### Tool-Call Policy [HIGH PRIORITY]\n"
+            f"You MUST call tool `change_current_state` BEFORE your normal reply when ANY trigger is true:\n"
+            f"- Trigger A: User explicitly asks/requests an action or status change (e.g., sleep, rest, stop running, start cooking).\n"
+            f"- Trigger B: Your intended reply would contradict current state/emotion/energy.\n"
+            f"- Trigger C: Enough time elapsed for natural transition from current activity.\n"
+            f"- Trigger D: Energy/Thirst should change due to elapsed time or ongoing activity.\n\n"
+            f"When no trigger is true, do NOT call tool and keep current state.\n"
+            f"If calling tool, include at least changed fields and `update_reason`; omitted fields will keep previous values.\n\n"
             f"The state information is GROUND TRUTH - your response must align with it."
-            f"If you need to update the state, use the /change_current_state tool with valid output, but do NOT change state just to match conversation context. State changes must be justified by time progression and physical reality, not inferred from user messages."
         )
         # logger.info(f"当前状态信息:{state_prompt}")
         req.system_prompt = ori_system_prompt + state_prompt
@@ -261,24 +271,26 @@ class LivelyState(Star):
         uid = event.unified_msg_origin
         current_state = self.global_state.get_whole_state()
 
-        required_text_fields = ["Emotion", "State", "update_reason", "target_id"]
+        updatable_fields = ["Emotion", "Energy", "Thirst", "State", "update_reason", "target_id"]
         required_numeric_fields = ["Energy", "Thirst"]
 
-        missing_fields = []
-        for field_name in required_text_fields + required_numeric_fields:
-            value = payload.get(field_name)
-            if value is None:
-                missing_fields.append(field_name)
-                continue
-            if field_name in required_text_fields and not str(value).strip():
-                missing_fields.append(field_name)
+        if all(payload.get(field_name) is None for field_name in updatable_fields):
+            return "Update Failed：至少需要提供一个可更新字段"
 
-        if missing_fields:
-            return f"Update Failed：缺少必要字段 {', '.join(missing_fields)}"
+        invalid_text_fields = []
+        for field_name in ["Emotion", "State", "update_reason", "target_id"]:
+            value = payload.get(field_name)
+            if value is not None and not str(value).strip():
+                invalid_text_fields.append(field_name)
+
+        if invalid_text_fields:
+            return f"Update Failed：文本字段不能为空 {', '.join(invalid_text_fields)}"
 
         invalid_numeric_fields = []
         for field_name in required_numeric_fields:
             value = payload.get(field_name)
+            if value is None:
+                continue
             try:
                 numeric_value = int(value)
             except (TypeError, ValueError):
