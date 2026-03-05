@@ -53,6 +53,10 @@ class CharacterState:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
 
+    def delete(self):
+        if self.path.exists():
+            self.path.unlink()
+
     def update(self, current_time, enable_update=True):
         # 更新角色状态的逻辑
         # self.LastUpdateTime = current_time
@@ -137,6 +141,12 @@ class LivelyState(Star):
     @filter.command("state_check")
     async def state_check(self, event: AstrMessageEvent) -> MessageEventResult:
         await self.context.send_message(event.unified_msg_origin, MessageChain().message(f"当前状态信息：{self.global_state.get_whole_state()}"))
+        event.stop_event()
+
+    @filter.command("state_del")
+    async def state_del(self, event: AstrMessageEvent) -> MessageEventResult:
+        self.global_state.delete()
+        await self.context.send_message(event.unified_msg_origin, MessageChain().message("状态已重置。"))
         event.stop_event()
 
     @filter.on_llm_request()
