@@ -79,12 +79,12 @@ async def change_current_state(self, event: AstrMessageEvent,
     '''更改当前角色状态。
 
     Args:
-        Emotion (str): 情绪状态
-        Energy (int): 能量值
-        Thirst (int): 饥渴值
-        State (str): 当前状态
-        update_reason (str): 更新原因
-        target_id (str): 目标ID（如果状态与当前用户相关，使用该用户ID；如果是全局状态，使用'none'；如果与其他用户相关，使用具体的用户ID）
+        Emotion (str): Your current emotional state
+        Energy (int): Your current energy level
+        Thirst (int): Your current thirst level
+        State (str): Your current physical state
+        update_reason (str): The reason for the state update
+        target_id (str): The target ID (if the state is related to the current user, use their ID; if it's a global state, use 'none'; if it's related to another user, use their specific ID)
     '''
     cur_state = {
         "LastUpdateTime": time.time(),
