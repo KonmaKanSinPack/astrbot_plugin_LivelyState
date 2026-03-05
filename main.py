@@ -70,12 +70,12 @@ class CharacterState:
 
 @filter.llm_tool(name="change_current_state") 
 async def change_current_state(self, event: AstrMessageEvent, 
-                               Emotion: str,
-                               Energy: int,
-                               Thirst: int,
-                               State: str,
-                               update_reason: str,
-                               target_id: str) -> MessageEventResult:
+                               Emotion: Optional[str] = None,
+                               Energy: Optional[int] = None,
+                               Thirst: Optional[int] = None,
+                               State: Optional[str] = None,
+                               update_reason: Optional[str] = None,
+                               target_id: Optional[str] = None) -> MessageEventResult:
     '''Change your current state. This tool is designed to be called by the LLM when it determines that a state change is necessary based on time progression and physical reality, not just user messages.
 
     Args:
@@ -97,7 +97,10 @@ async def change_current_state(self, event: AstrMessageEvent,
     }
     report = self._handle_apply(event, cur_state)
     logger.info("State update report: %s", report)
-    yield event.plain_result("状态已更新。")
+    if report.startswith("状态更新失败"):
+        yield event.plain_result(report)
+    else:
+        yield event.plain_result("状态已更新。")
 
 @register("LivelyState", "兔子", "状态机", "0.0.1")
 class LivelyState(Star):
@@ -249,20 +252,66 @@ class LivelyState(Star):
         if not payload:
             return "请提供大模型返回的 Dict 内容。"
 
-        if not isinstance(payload, dict): return "状态更新数据必须是对象" 
+        if not isinstance(payload, dict):
+            return "状态更新数据必须是对象"
 
         uid = event.unified_msg_origin
+        current_state = self.global_state.get_whole_state()
 
-        reason = payload.get("update_reason", "无理由说明。")
-        target_id = payload.get("target_id") or "none"
+        required_text_fields = ["Emotion", "State", "update_reason", "target_id"]
+        required_numeric_fields = ["Energy", "Thirst"]
+
+        missing_fields = []
+        for field_name in required_text_fields + required_numeric_fields:
+            value = payload.get(field_name)
+            if value is None:
+                missing_fields.append(field_name)
+                continue
+            if field_name in required_text_fields and not str(value).strip():
+                missing_fields.append(field_name)
+
+        if missing_fields:
+            return f"状态更新失败：缺少必要字段 {', '.join(missing_fields)}"
+
+        invalid_numeric_fields = []
+        for field_name in required_numeric_fields:
+            value = payload.get(field_name)
+            try:
+                numeric_value = int(value)
+            except (TypeError, ValueError):
+                invalid_numeric_fields.append(f"{field_name}(非整数)")
+                continue
+
+            if numeric_value < 0 or numeric_value > 100:
+                invalid_numeric_fields.append(f"{field_name}(超出0-100)")
+
+        if invalid_numeric_fields:
+            return f"状态更新失败：数值字段非法 {', '.join(invalid_numeric_fields)}"
+
+        def _clamp_int(value: Any, fallback: int, min_value: int = 0, max_value: int = 100) -> int:
+            try:
+                if value is None:
+                    return fallback
+                return max(min_value, min(max_value, int(value)))
+            except (TypeError, ValueError):
+                return fallback
+
+        def _safe_text(value: Any, fallback: str) -> str:
+            if value is None:
+                return fallback
+            text = str(value).strip()
+            return text or fallback
+
+        reason = _safe_text(payload.get("update_reason"), current_state.get("update_reason", "无理由说明。"))
+        target_id = _safe_text(payload.get("target_id"), current_state.get("target_id", "none"))
         
     
         new_state_data = {
             "LastUpdateTime": time.time(),
-            "Emotion": payload.get("Emotion", "Normal"),
-            "Energy": payload.get("Energy", 100),
-            "Thirst": payload.get("Thirst", 100),
-            "State": payload.get("State", "Idle"),
+            "Emotion": _safe_text(payload.get("Emotion"), current_state.get("Emotion", "Normal")),
+            "Energy": _clamp_int(payload.get("Energy"), _clamp_int(current_state.get("Energy"), 100)),
+            "Thirst": _clamp_int(payload.get("Thirst"), _clamp_int(current_state.get("Thirst"), 0)),
+            "State": _safe_text(payload.get("State"), current_state.get("State", "Idle")),
             "update_reason": reason,
             "target_id": target_id,
         }
