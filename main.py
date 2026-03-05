@@ -197,7 +197,7 @@ class LivelyState(Star):
             f"- 持续活动或时间流逝导致 Energy 应发生变化：调用本工具\n\n"
             f"### 工具调用格式【严格】\n"
             f"- 只能使用原生工具调用（真实 function call），不能用普通文本假装调用。\n"
-            f"- 严禁在回复正文输出伪标签，如 <execute_tool>...</execute_tool>。\n"
+            f"- 严禁在回复正文输出伪标签\n"
             f"- 工具参数名必须使用以下字段：Emotion、Energy、State、update_reason、target_id。\n\n"
             f"- 若未命中触发条件，则不要调用工具，并保持当前状态。\n"
             f"- 若调用工具，至少填写发生变化的字段和 update_reason；未填写字段将沿用旧值。\n\n"
@@ -212,7 +212,6 @@ class LivelyState(Star):
         #     return "Attach conversation text after the prompt sub-command, e.g., /memory prompt recent conversation."
         logger.info("Creating state prompt, operator: %s", event.get_sender_name())
 
-        cur_msg = event.message_str
         uid = event.unified_msg_origin
         state_info = self.global_state.get_whole_state()
         time_elapsed = time.time() - state_info["LastUpdateTime"]
@@ -222,7 +221,6 @@ class LivelyState(Star):
         template = (
             "## Character State Assessment Task\n\n"
             "### Current Context\n"
-            f"- User Latest Message: {cur_msg}\n"
             f"- Current User ID: {uid}\n"
             f"- Current State Target ID: {target_id} (who this state is associated with; 'none' means global)\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
