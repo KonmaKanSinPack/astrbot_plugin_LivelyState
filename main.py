@@ -69,7 +69,7 @@ class CharacterState:
 
 
 @filter.llm_tool(name="change_current_state") 
-def change_current_state(self, event: AstrMessageEvent, 
+async def change_current_state(self, event: AstrMessageEvent, 
                                Emotion: Optional[str] = None,
                                Energy: Optional[int] = None,
                                Thirst: Optional[int] = None,
@@ -97,10 +97,10 @@ def change_current_state(self, event: AstrMessageEvent,
     }
     report = self._handle_apply(event, cur_state)
     logger.info("State update report: %s", report)
-    if report.startswith("状态更新失败"):
-        return report  
+    if report.startswith("Update Failed"):
+        await event.send(event.plain_result(report))
     else:
-       return "Update successful: " + report
+        await event.send(event.plain_result("Update successful: " + report))
 
 @register("LivelyState", "兔子", "状态机", "0.0.1")
 class LivelyState(Star):
@@ -273,7 +273,7 @@ class LivelyState(Star):
                 missing_fields.append(field_name)
 
         if missing_fields:
-            return f"状态更新失败：缺少必要字段 {', '.join(missing_fields)}"
+            return f"Update Failed：缺少必要字段 {', '.join(missing_fields)}"
 
         invalid_numeric_fields = []
         for field_name in required_numeric_fields:
@@ -288,7 +288,7 @@ class LivelyState(Star):
                 invalid_numeric_fields.append(f"{field_name}(超出0-100)")
 
         if invalid_numeric_fields:
-            return f"状态更新失败：数值字段非法 {', '.join(invalid_numeric_fields)}"
+            return f"Update Failed：数值字段非法 {', '.join(invalid_numeric_fields)}"
 
         def _clamp_int(value: Any, fallback: int, min_value: int = 0, max_value: int = 100) -> int:
             try:
