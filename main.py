@@ -69,7 +69,7 @@ class CharacterState:
 
 
 @filter.llm_tool(name="change_current_state") 
-async def change_current_state(self, event: AstrMessageEvent, 
+def change_current_state(self, event: AstrMessageEvent, 
                                Emotion: Optional[str] = None,
                                Energy: Optional[int] = None,
                                Thirst: Optional[int] = None,
@@ -98,9 +98,9 @@ async def change_current_state(self, event: AstrMessageEvent,
     report = self._handle_apply(event, cur_state)
     logger.info("State update report: %s", report)
     if report.startswith("状态更新失败"):
-        yield event.plain_result(report)
+        return report  
     else:
-        yield event.plain_result("状态已更新。")
+       return "Update successful: " + report
 
 @register("LivelyState", "兔子", "状态机", "0.0.1")
 class LivelyState(Star):
