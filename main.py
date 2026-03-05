@@ -145,7 +145,6 @@ class LivelyState(Star):
         ori_system_prompt = req.system_prompt or ""
         # logger.info(f"原系统提示词_LivelyState:{ori_system_prompt}")
 
-        # llm_response = await self.send_prompt(event, state_prompt)
         # logger.info(f"状态提示词发送完毕，收到回复\n{llm_response}")
         # report = self._handle_apply(event, llm_response)
         # logger.info("State update report: %s", report)
@@ -161,7 +160,6 @@ class LivelyState(Star):
         state_prompt = (
             f"\n## Character State Constraints [MANDATORY]\n\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
-            f"**Latest User Message**: {event.message_str}\n"
             f"**current_physical_state**: {current_physical_state}\n"
             f"**emotion**: {state_info['emotion']}\n"
             f"**energy_level**: {state_info['energy_level']}/100\n"
@@ -287,101 +285,6 @@ class LivelyState(Star):
         if stripped[0] in "[{" and stripped[-1] in "]}":
             return stripped
         return None
-
-    async def send_prompt(self,event: AstrMessageEvent,prompt: str) -> str:
-        #获取UID
-        uid = event.unified_msg_origin
-
-        #获取人格
-        person_prompt = await self.context.persona_manager.get_default_persona_v3(uid)
-        if not person_prompt:
-            person_prompt = self.context.provider_manager.selected_default_persona["prompt"]
-
-        #获取历史记录
-        conver_mgr = self.context.conversation_manager
-        cur_cid = await conver_mgr.get_curr_conversation_id(uid)
-        conversation = await conver_mgr.get_conversation(uid, cur_cid)
-        history = json.loads(conversation.history) if conversation and conversation.history else []
-
-        #发送信息到llm
-        sys_msg = f"{person_prompt}"
-        provider = self.context.get_using_provider()
-        logger.info(f"当前提供商：{provider}")
-        # logger.info(f"获取会话的配置文件{self.context.astrbot_config_mgr.get_conf(uid)}")
-        # logger.info(f"获取提供商配置{self.context.astrbot_config_mgr.g(uid, "provider_settings")}")
-        llm_resp = await provider.text_chat(
-                prompt=prompt,
-                session_id=None,
-                contexts=history,
-                image_urls=[],
-                func_tool=None,
-                system_prompt=sys_msg,
-            )
-        # await conv_mgr.add_message_pair(
-        #     cid=curr_cid,
-        #     user_message=user_msg,
-        #     assistant_message=AssistantMessageSegment(
-        #         content=[TextPart(text=llm_resp.completion_text)]
-        #     ),
-        # )
-        return llm_resp.completion_text
-
-
-    async def get_persona_system_prompt(self, session: str) -> str:
-        """获取人格系统提示词
-
-        Args:
-            session: 会话ID
-
-        Returns:
-            人格系统提示词
-        """
-        base_system_prompt = ""
-        try:
-            # 尝试获取当前会话的人格设置
-            uid = session  # session 就是 unified_msg_origin
-            curr_cid = await self.context.conversation_manager.get_curr_conversation_id(
-                uid
-            )
-
-            # 获取默认人格设置
-            default_persona_obj = self.context.provider_manager.selected_default_persona
-
-            if curr_cid:
-                conversation = await self.context.conversation_manager.get_conversation(
-                    uid, curr_cid
-                )
-
-                if (
-                    conversation
-                    and conversation.persona_id
-                    and conversation.persona_id != "[%None]"
-                ):
-                    # 有指定人格，尝试获取人格的系统提示词
-                    personas = self.context.provider_manager.personas
-                    if personas:
-                        for persona in personas:
-                            if (
-                                hasattr(persona, "name")
-                                and persona.name == conversation.persona_id
-                            ):
-                                base_system_prompt = getattr(persona, "prompt", "")
-                                
-                                break
-
-            # 如果没有获取到人格提示词，尝试使用默认人格
-            if (
-                not base_system_prompt
-                and default_persona_obj
-                and default_persona_obj.get("prompt")
-            ):
-                base_system_prompt = default_persona_obj["prompt"]
-                
-
-        except Exception as e:
-            logger.warning(f"获取人格系统提示词失败: {e}")
-
-        return base_system_prompt
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
