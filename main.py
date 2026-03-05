@@ -72,7 +72,7 @@ async def change_current_state(self, event: AstrMessageEvent,
                                Thirst: Optional[int] = None,
                                State: Optional[str] = None,
                                update_reason: Optional[str] = None,
-                               related: Optional[bool] = None) -> MessageEventResult:
+                               target_id: Optional[str] = None) -> MessageEventResult:
 
     '''Change your current state. This tool is designed to be called by the LLM when it determines that a state change is necessary based on time progression and physical reality, not just user messages.
 
@@ -82,20 +82,8 @@ async def change_current_state(self, event: AstrMessageEvent,
         Thirst (int): Your current thirst level
         State (str): Your current physical state
         update_reason (str): The reason for the state update
-        related (boolean): If the state is related to the current user, use true; otherwise use false for global state.
+        target_id (str): The target ID (if the state is related to the current user, use their UID; if it's a global state, use 'none'; if it's related to another user, use their specific UID)
     '''
-    if isinstance(related, str):
-        normalized_related = related.strip().lower()
-        if normalized_related == "true":
-            related = True
-        elif normalized_related == "false":
-            related = False
-
-    if not isinstance(related, bool):
-        await event.send(event.plain_result("Update Failed：related 必须是布尔值 true/false"))
-        return
-
-    target_id = event.unified_msg_origin if related else "none"
     cur_state = {
         "LastUpdateTime": time.time(),
         "Emotion": Emotion,
@@ -146,10 +134,9 @@ class LivelyState(Star):
         time_elapsed = time.time() - state_info["LastUpdateTime"]
         if target_id == "none":
             target_note = "This state is global (not tied to any specific user)."
-        elif target_id == uid:
-            target_note = f"This state is tied to YOU (user {target_id})."
         else:
-            target_note = f"This state is tied to ANOTHER user ({target_id}); maintain consistency with that context."
+            target_note = f"This state is tied to user {target_id}."
+        
         state_prompt = (
             f"\n## Character State Constraints [MANDATORY]\n\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
@@ -316,8 +303,6 @@ class LivelyState(Star):
 
         reason = _safe_text(payload.get("update_reason"), current_state.get("update_reason", "无理由说明。"))
         target_id = _safe_text(payload.get("target_id"), current_state.get("target_id", "none"))
-        if target_id not in {uid, "none"}:
-            return f"Update Failed：target_id 非法，必须是当前 uid({uid}) 或 none"
         
     
         new_state_data = {
