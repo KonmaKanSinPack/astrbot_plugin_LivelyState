@@ -27,6 +27,7 @@ class CharacterState:
             "LastUpdateTime": time.time(),
             "emotion": "Normal",
             "energy_level": 100,
+            "thirst": 0,
             "physical_state": "Idle",
             "update_reason": "Initial state",
             "target_id": "none",
@@ -84,6 +85,7 @@ class LivelyState(Star):
     async def apply_state_transition(self, event: AstrMessageEvent, 
                                 emotion: Optional[str] = None,
                                 energy_level: Optional[int] = None,
+                                thirst: Optional[int] = None,
                                 physical_state: Optional[str] = None,
                                 update_reason: Optional[str] = None,
                                 target_id: Optional[str] = None,
@@ -93,6 +95,7 @@ class LivelyState(Star):
 
         使用建议（给 LLM 的决策规则）：
         - 【核心原则：抓大放小】只有当发生重大场景转移（如出门/回家）、大段活动切换（如从工作切到睡觉、从日常聊天切到出门运动）或剧烈情绪/能量变化时，才调用 apply_state_transition。
+        - 【调用冷却】同一场景内的状态更新至少间隔 300 秒以上，避免过于频繁地调用工具。
         - 【禁止频繁调用】同一场景内的连续微小动作（如倒水、换个姿势躺着、脱衣服洗澡、关灯等），禁止调用工具；直接在文本回复的动作描写中体现即可。
         - 【判定冲突标准】只有当你准备回复的内容与当前状态存在根本性矛盾（例如当前状态是“在外面跑步”，但你要回复“在床上睡觉”）时，才必须先调用工具。细微姿势或交互改变不算冲突。
         - 距离上次更新已过较长时间，且当前活动按常理应自然结束或转场时调用。
@@ -103,6 +106,7 @@ class LivelyState(Star):
         Args:
             emotion (str, optional): 情绪状态。
             energy_level (int, optional): 体力值，范围 0-100。
+            thirst (int, optional): 欲望值，范围 0-100。值越高表示角色当前欲望越强烈。
             physical_state (str, optional): 物理/行为状态。
             update_reason (str, optional): 状态更新原因。
             target_id (str, optional): 关联对象 ID，`none` 表示全局状态。
@@ -113,6 +117,7 @@ class LivelyState(Star):
             "LastUpdateTime": time.time(),
             "emotion": emotion,
             "energy_level": energy_level,
+            "thirst": thirst,
             "physical_state": physical_state,
             "update_reason": update_reason,
             "target_id": target_id,
@@ -162,6 +167,7 @@ class LivelyState(Star):
             f"**current_physical_state**: {current_physical_state}\n"
             f"**emotion**: {state_info['emotion']}\n"
             f"**energy_level**: {state_info['energy_level']}/100\n"
+            f"**thirst (desire_level)**: {state_info.get('thirst', 0)}/100\n"
             f"**Current User ID**: {uid}\n"
             f"**Target ID**: {target_id} (who this state is associated with; 'none' means global)\n"
             f"**Last State Update Reason**: {state_info.get('update_reason', 'unspecified')}\n"
@@ -173,20 +179,21 @@ class LivelyState(Star):
             f"- 回复必须体现当前状态（{current_physical_state}）与情绪（{state_info['emotion']}）。\n"
             f"- 若处于进行中的体力活动，需在聊天中体现“仍在该活动中”。\n"
             f"- 若 energy_level < 30，语气和措辞需体现明显疲惫。\n"
+            f"- 若 thirst > 70，角色在互动中应隐约体现出更强烈的渴求感；thirst < 20 时则几乎不体现。\n"
             f"- 情绪变化需渐进（情绪惯性），避免突然跳变。\n"
             f"- 同一状态对所有用户保持一致，不因对象不同而自相矛盾。\n\n"
-            f"### 使用建议（给 LLM 的决策规则）\n"
-            f"- 【核心原则：抓大放小】只有当发生重大场景转移（如出门/回家）、大段活动切换（如从工作切到睡觉、从日常聊天切到出门运动）或剧烈情绪/能量变化时，才调用 apply_state_transition。\n"
-            f"- 【禁止频繁调用】同一场景内的连续微小动作（如倒水、换个姿势躺着、脱衣服洗澡、关灯等），禁止调用工具；直接在文本回复的动作描写中体现即可。\n"
-            f"- 【判定冲突标准】只有当你准备回复的内容与当前状态存在根本性矛盾（例如当前状态是“在外面跑步”，但你要回复“在床上睡觉”）时，才必须先调用工具。细微姿势或交互改变不算冲突。\n"
-            f"- 距离上次更新已过较长时间，且当前活动按常理应自然结束或转场时调用。\n"
-            f"- 持续活动或时间流逝导致 energy_level 出现大幅度（>15）增减时调用。\n\n"
-            f"### 工具调用格式【严格】\n"
-            f"- 只能使用原生工具调用（真实 function call），不能用普通文本假装调用。\n"
-            f"- 严禁在回复正文输出伪标签\n"
-            f"- 工具参数名必须使用以下字段：emotion、energy_level、physical_state、update_reason、target_id。\n\n"
-            f"- 若未命中触发条件，则不要调用工具，并保持当前状态。\n"
-            f"- 若调用工具，至少填写发生变化的字段和 update_reason；未填写字段将沿用旧值。\n\n"
+            # f"### 使用建议（给 LLM 的决策规则）\n"
+            # f"- 【核心原则：抓大放小】只有当发生重大场景转移（如出门/回家）、大段活动切换（如从工作切到睡觉、从日常聊天切到出门运动）或剧烈情绪/能量变化时，才调用 apply_state_transition。\n"
+            # f"- 【禁止频繁调用】同一场景内的连续微小动作（如倒水、换个姿势躺着、脱衣服洗澡、关灯等），禁止调用工具；直接在文本回复的动作描写中体现即可。\n"
+            # f"- 【判定冲突标准】只有当你准备回复的内容与当前状态存在根本性矛盾（例如当前状态是“在外面跑步”，但你要回复“在床上睡觉”）时，才必须先调用工具。细微姿势或交互改变不算冲突。\n"
+            # f"- 距离上次更新已过较长时间，且当前活动按常理应自然结束或转场时调用。\n"
+            # f"- 持续活动或时间流逝导致 energy_level 出现大幅度（>15）增减时调用。\n\n"
+            # f"### 工具调用格式【严格】\n"
+            # f"- 只能使用原生工具调用（真实 function call），不能用普通文本假装调用。\n"
+            # f"- 严禁在回复正文输出伪标签\n"
+            # f"- 工具参数名必须使用以下字段：emotion、energy_level、physical_state、update_reason、target_id。\n\n"
+            # f"- 若未命中触发条件，则不要调用工具，并保持当前状态。\n"
+            # f"- 若调用工具，至少填写发生变化的字段和 update_reason；未填写字段将沿用旧值。\n\n"
             f"- 状态信息是事实基准（GROUND TRUTH），你的回复必须与其一致。"
         )
         # logger.info(f"当前状态信息:{state_prompt}")
@@ -203,8 +210,8 @@ class LivelyState(Star):
         uid = event.unified_msg_origin
         current_state = self.global_state.get_whole_state()
 
-        updatable_fields = ["emotion", "energy_level", "physical_state", "update_reason", "target_id"]
-        required_numeric_fields = ["energy_level"]
+        updatable_fields = ["emotion", "energy_level", "thirst", "physical_state", "update_reason", "target_id"]
+        required_numeric_fields = ["energy_level", "thirst"]
 
         if all(payload.get(field_name) is None for field_name in updatable_fields):
             return "Update Failed：至少需要提供一个可更新字段"
@@ -256,6 +263,7 @@ class LivelyState(Star):
             "LastUpdateTime": time.time(),
             "emotion": _safe_text(payload.get("emotion"), current_state.get("emotion", "Normal")),
             "energy_level": _clamp_int(payload.get("energy_level"), _clamp_int(current_state.get("energy_level"), 100)),
+            "thirst": _clamp_int(payload.get("thirst"), _clamp_int(current_state.get("thirst"), 0)),
             "physical_state": _safe_text(payload.get("physical_state"), current_state.get("physical_state", "Idle")),
             "update_reason": reason,
             "target_id": target_id,
