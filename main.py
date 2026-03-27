@@ -197,7 +197,7 @@ class LivelyState(Star):
             f"- 状态信息是事实基准（GROUND TRUTH），你的回复必须与其一致。"
         )
         # logger.info(f"当前状态信息:{state_prompt}")
-        req.prompt = f"[{state_prompt}]\n{ori_msg}"
+        req.prompt = f"[<global_state>{state_prompt}]\n</global_state>\n{ori_msg}"
         # logger.info(f"当前系统提示词——LivelyState: {req.system_prompt}")
 
     def _handle_apply(self, event, payload: dict) -> str:
