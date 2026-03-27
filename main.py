@@ -145,7 +145,8 @@ class LivelyState(Star):
     @filter.on_llm_request()
     async def add_state(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
         uid = event.unified_msg_origin
-        ori_system_prompt = req.system_prompt or ""
+        # ori_system_prompt = req.system_prompt or ""'
+        ori_msg = req.prompt
         # logger.info(f"原系统提示词_LivelyState:{ori_system_prompt}")
 
         # logger.info(f"状态提示词发送完毕，收到回复\n{llm_response}")
@@ -196,8 +197,8 @@ class LivelyState(Star):
             f"- 状态信息是事实基准（GROUND TRUTH），你的回复必须与其一致。"
         )
         # logger.info(f"当前状态信息:{state_prompt}")
-        req.system_prompt = ori_system_prompt + state_prompt
-        logger.info(f"当前系统提示词——LivelyState: {req.system_prompt}")
+        req.prompt = f"[{state_prompt}]\n{ori_msg}"
+        # logger.info(f"当前系统提示词——LivelyState: {req.system_prompt}")
 
     def _handle_apply(self, event, payload: dict) -> str:
         if not payload:
