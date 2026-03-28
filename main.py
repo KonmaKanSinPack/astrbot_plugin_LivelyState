@@ -90,6 +90,7 @@ class GlobalObserver:
         # 检查是否达到了触发总结的条件
         if self.new_message_count >= self.trigger_threshold:
             await self._trigger_summarization(event)
+            self.new_message_count = 0  # 重置计数器
     
     async def _trigger_summarization(self,event):
         """触发后台总结逻辑"""
