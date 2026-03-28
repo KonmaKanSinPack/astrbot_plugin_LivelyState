@@ -146,7 +146,7 @@ class GlobalObserver:
         return llm_resp.completion_text
 
     def view_recent_messages(self):
-        logger.info(list(self.recent_messages))
+        logger.info(f"Recent messages: {list(self.recent_messages)}")
 
 @register("LivelyState", "兔子", "这是一个让角色拥有持续状态记忆的拟人插件：不再每句“重开存档”，而是带着上一刻的心情继续和你说话。", "v1.0.0")
 class LivelyState(Star):
@@ -254,6 +254,7 @@ class LivelyState(Star):
 
         message_str = event.message_str
         self.global_observer.add_message(f"[role:user,uid:{uid}]: {message_str}")
+        logger.info(f"Added message to observer: [role:user,uid:{uid}]: {message_str}")
         self.global_observer.view_recent_messages()
         state_info = self.global_state.get_whole_state()
         current_physical_state = state_info.get("physical_state", "Idle")
