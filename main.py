@@ -116,7 +116,6 @@ class GlobalObserver:
         self.current_state = f"<recent_chat_summary>{summary}</recent_chat_summary>"
 
     async def send_prompt(self, event, context, extra_prompt=""):
-        uid = event.unified_msg_origin
         # provider_id = await self.context.get_current_chat_provider_id(uid)
         # logger.info(f"uid:{uid}")
 
@@ -134,7 +133,7 @@ class GlobalObserver:
                         f"2. 格式要求：输出必须是一句简短的、以第一人称或客观状态描述的中文句子，最多不超过 50 个字。严禁输出“摘要如下”、“我现在的状态是”等任何废话。\n"
                         f"以下是你最近与多位用户的聊天记录。assistant表示AI助手的回复，user表示用户的提问：\n"
                     )
-        provider = self.context.get_using_provider()
+        provider = context.get_using_provider()
         llm_resp = await provider.text_chat(
                 prompt=extra_prompt,
                 session_id=None,
