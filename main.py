@@ -235,21 +235,22 @@ class LivelyState(Star):
             logger.error(f"获取会话历史失败: {e}")
             return f"获取会话历史失败: {e}" 
         history = json.loads(conversation.history) if conversation and conversation.history else []
-        logger.info(f"当前会话历史: {(history)}")
-        if history[-1]["role"] == "assistant":
-            last_reply = [msg
-                          for msg in history[-1].get("content", [])
-                          ]
-            last_reply_text = "[role:assistant]:" + "\n".join(last_reply)
-            self.global_observer.add_message(last_reply_text)
-        elif history[-2]["role"] == "assistant":
-            last_reply = [msg
-                          for msg in history[-2].get("content", [])
-                          ]
-            last_reply_text = "[role:assistant]," + "\n".join(last_reply)
-            self.global_observer.add_message(last_reply_text)
-        else:
-            logger.warning("无法找到上一条助手回复，不更新状态观察器。")
+        if len(history) >=2:
+            logger.info(f"上一个会话历史: {(history[-1])}")
+            if history[-1]["role"] == "assistant":
+                last_reply = [msg
+                            for msg in history[-1].get("content", [])
+                            if isinstance(msg, Dict) and msg.get("type") == "text"]
+                last_reply_text = "[role:assistant]:" + "\n".join(last_reply)
+                self.global_observer.add_message(last_reply_text)
+            elif history[-2]["role"] == "assistant":
+                last_reply = [msg
+                            for msg in history[-2].get("content", [])
+                            if isinstance(msg, Dict) and msg.get("type") == "text"]
+                last_reply_text = "[role:assistant]," + "\n".join(last_reply)
+                self.global_observer.add_message(last_reply_text)
+            else:
+                logger.warning("无法找到上一条助手回复，不更新状态观察器。")
 
         message_str = event.message_str
         self.global_observer.add_message(f"[role:user,uid:{uid}]: {message_str}")
