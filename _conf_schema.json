@@ -1,0 +1,12 @@
+{
+    "queue_max_size":{
+        "description": "与他人聊天记录缓存大小，超过这个数量就会丢弃最早的消息",
+        "type": "int",
+        "default": 50
+    },
+    "trigger_threshold":{
+        "description": "每攒够多少条新消息就触发一次总结",
+        "type": "int",
+        "default": 20
+    }
+}

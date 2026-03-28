@@ -8,7 +8,7 @@ from astrbot.api.provider import ProviderRequest
 from typing import Any, Dict, List, Optional, Tuple
 from astrbot.api.event import MessageChain
 from astrbot.api.star import StarTools
-
+from astrbot.api import AstrBotConfig
 import json_repair
 
 from pydantic import Field
@@ -72,11 +72,11 @@ class CharacterState:
 
 
 class GlobalObserver:
-    def __init__(self, max_size=50):
+    def __init__(self, max_size=50, trigger_threshold = 20):
         self.recent_messages = deque(maxlen=max_size)
         
         # 我们可以顺便设一个触发阈值，比如每攒够 20 条新消息就触发一次总结
-        self.trigger_threshold = 20 
+        self.trigger_threshold = trigger_threshold
         self.new_message_count = 0  
         
         # 用来存储大模型总结出来的“当前状态”
@@ -157,11 +157,12 @@ class GlobalObserver:
 
 @register("LivelyState", "兔子", "这是一个让角色拥有持续状态记忆的拟人插件：不再每句“重开存档”，而是带着上一刻的心情继续和你说话。", "v1.1.0")
 class LivelyState(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.context = context
+        self.config = config
         self.global_state = CharacterState()
-        self.global_observer = GlobalObserver()
+        self.global_observer = GlobalObserver(max_size=config.get("queue_max_size", 50), trigger_threshold=config.get("trigger_threshold", 20))
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
