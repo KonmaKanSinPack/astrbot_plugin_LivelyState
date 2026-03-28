@@ -82,17 +82,17 @@ class GlobalObserver:
         # 用来存储大模型总结出来的“当前状态”
         self.current_state = ""
 
-    async def add_message(self, message_text, event):
+    async def add_message(self, message_text, event, context):
         """每次系统收到任何人的消息，都调用这个方法塞进来"""
         self.recent_messages.append(message_text)
         self.new_message_count += 1
         
         # 检查是否达到了触发总结的条件
         if self.new_message_count >= self.trigger_threshold:
-            await self._trigger_summarization(event)
+            await self._trigger_summarization(event, context)
             self.new_message_count = 0  # 重置计数器
     
-    async def _trigger_summarization(self,event):
+    async def _trigger_summarization(self,event, context):
         """触发后台总结逻辑"""
         
         # 1. 把 deque 里的消息拿出来拼成一段文本
@@ -100,34 +100,40 @@ class GlobalObserver:
         chat_history_text = "\n".join(self.recent_messages)
         
         # 2. 这里将来会调用大模型API，传入 chat_history_text
-        task_prompt = (f"你是一个系统后台的“认知状态提取器。\n"
-                        f"你的任务是阅读系统刚刚发生的 N 条多用户对话记录，提炼出 AI 助手此刻的“心境、刚刚聊了什么或整体氛围”，并浓缩成一，两句话。\n"
-                        f"【绝对规则】（违反将导致系统崩溃）：\n"
-                        f"1. 视角限制：只能描述“系统/AI助手”刚刚经历了什么，不要复述用户说了什么。\n"
-                        f"2. 格式要求：输出必须是一句简短的、以第一人称或客观状态描述的中文句子，最多不超过 50 个字。严禁输出“摘要如下”、“我现在的状态是”等任何废话。\n"
-                        f"以下是你最近与多位用户的聊天记录。assistant表示AI助手的回复，user表示用户的提问：\n"
-                        f"{chat_history_text}\n"
-        )
-        summary = await self.send_prompt(event, extra_prompt=task_prompt)
+        # task_prompt = (f"你是一个系统后台的“认知状态提取器。\n"
+        #                 f"你的任务是阅读系统刚刚发生的 N 条多用户对话记录，提炼出 AI 助手此刻的“心境、刚刚聊了什么或整体氛围”，并浓缩成一，两句话。\n"
+        #                 f"【绝对规则】（违反将导致系统崩溃）：\n"
+        #                 f"1. 视角限制：只能描述“系统/AI助手”刚刚经历了什么，不要复述用户说了什么。\n"
+        #                 f"2. 格式要求：输出必须是一句简短的、以第一人称或客观状态描述的中文句子，最多不超过 50 个字。严禁输出“摘要如下”、“我现在的状态是”等任何废话。\n"
+        #                 f"以下是你最近与多位用户的聊天记录。assistant表示AI助手的回复，user表示用户的提问：\n"
+        #                 f"{chat_history_text}\n"
+        #                 )
+        summary = await self.send_prompt(event, context, extra_prompt=chat_history_text)
         
         # 3. 更新状态并清零计数器
         # self.current_state = new_state
         self.new_message_count = 0
         self.current_state = f"<recent_chat_summary>{summary}</recent_chat_summary>"
 
-    async def send_prompt(self, event, extra_prompt=""):
+    async def send_prompt(self, event, context, extra_prompt=""):
         uid = event.unified_msg_origin
         # provider_id = await self.context.get_current_chat_provider_id(uid)
         # logger.info(f"uid:{uid}")
 
         #获取人格
         # system_prompt = await self.get_persona_system_prompt(uid)
-        person_prompt = await self.context.persona_manager.get_default_persona_v3(uid)
-        if not person_prompt:
-            person_prompt = self.context.provider_manager.selected_default_persona["prompt"]
+        # person_prompt = await self.context.persona_manager.get_default_persona_v3(uid)
+        # if not person_prompt:
+        #     person_prompt = self.context.provider_manager.selected_default_persona["prompt"]
 
         #发送信息到llm
-        sys_msg = f"{person_prompt}"
+        sys_msg = (f"你是一个系统后台的“认知状态提取器。\n"
+                        f"你的任务是阅读系统刚刚发生的 N 条多用户对话记录，提炼出 AI 助手此刻的“心境、刚刚聊了什么或整体氛围”，并浓缩成一，两句话。\n"
+                        f"【绝对规则】（违反将导致系统崩溃）：\n"
+                        f"1. 视角限制：只能描述“系统/AI助手”刚刚经历了什么，不要复述用户说了什么。\n"
+                        f"2. 格式要求：输出必须是一句简短的、以第一人称或客观状态描述的中文句子，最多不超过 50 个字。严禁输出“摘要如下”、“我现在的状态是”等任何废话。\n"
+                        f"以下是你最近与多位用户的聊天记录。assistant表示AI助手的回复，user表示用户的提问：\n"
+                    )
         provider = self.context.get_using_provider()
         llm_resp = await provider.text_chat(
                 prompt=extra_prompt,
@@ -243,18 +249,18 @@ class LivelyState(Star):
                             for msg in history[-1].get("content", [])
                             if isinstance(msg, Dict) and msg.get("type") == "text"]
                 last_reply_text = f"[role:assistant,reply to user:uid:{uid}]: " + "\n".join(last_reply)
-                await self.global_observer.add_message(last_reply_text, event)
+                await self.global_observer.add_message(last_reply_text, event, self.context)
             elif history[-2]["role"] == "assistant":
                 last_reply = [msg.get("text", "")
                             for msg in history[-2].get("content", [])
                             if isinstance(msg, Dict) and msg.get("type") == "text"]
                 last_reply_text = f"[role:assistant,reply to user:uid:{uid}]: " + "\n".join(last_reply)
-                await self.global_observer.add_message(last_reply_text, event)
+                await self.global_observer.add_message(last_reply_text, event, self.context)
             else:
                 logger.warning("无法找到上一条助手回复，不更新状态观察器。")
 
         message_str = event.message_str
-        await self.global_observer.add_message(f"[role:user,uid:{uid}]: {message_str}", event)
+        await self.global_observer.add_message(f"[role:user,uid:{uid}]: {message_str}", event, self.context)
         logger.info(f"Added message to observer: [role:user,uid:{uid}]: {message_str}")
         self.global_observer.view_recent_messages()
         state_info = self.global_state.get_whole_state()
