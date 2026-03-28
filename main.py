@@ -1,3 +1,4 @@
+from collections import deque
 import json
 import time
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
@@ -70,13 +71,90 @@ class CharacterState:
 #         self.character_states =    
 
 
+class GlobalObserver:
+    def __init__(self, max_size=50):
+        self.recent_messages = deque(maxlen=max_size)
+        
+        # 我们可以顺便设一个触发阈值，比如每攒够 20 条新消息就触发一次总结
+        self.trigger_threshold = 20 
+        self.new_message_count = 0  
+        
+        # 用来存储大模型总结出来的“当前状态”
+        self.current_state = ""
+
+    async def add_message(self, message_text, event=None):
+        """每次系统收到任何人的消息，都调用这个方法塞进来"""
+        self.recent_messages.append(message_text)
+        self.new_message_count += 1
+        
+        # 检查是否达到了触发总结的条件
+        if self.new_message_count >= self.trigger_threshold:
+            await self._trigger_summarization(event)
+    
+    async def _trigger_summarization(self,event):
+        """触发后台总结逻辑"""
+        
+        # 1. 把 deque 里的消息拿出来拼成一段文本
+        # 注意：这里我们只要文本，不带 user_id，彻底隔绝隐私
+        chat_history_text = "\n".join(self.recent_messages)
+        
+        # 2. 这里将来会调用大模型API，传入 chat_history_text
+        task_prompt = (f"你是一个系统后台的“认知状态提取器。\n"
+                        f"你的任务是阅读系统刚刚发生的 N 条多用户对话记录，提炼出 AI 助手此刻的“心境、刚刚聊了什么或整体氛围”，并浓缩成一，两句话。\n"
+                        f"【绝对规则】（违反将导致系统崩溃）：\n"
+                        f"1. 视角限制：只能描述“系统/AI助手”刚刚经历了什么，不要复述用户说了什么。\n"
+                        f"2. 格式要求：输出必须是一句简短的、以第一人称或客观状态描述的中文句子，最多不超过 50 个字。严禁输出“摘要如下”、“我现在的状态是”等任何废话。\n"
+                        f"以下是你最近与多位用户的聊天记录。assistant表示AI助手的回复，user表示用户的提问：\n"
+                        f"{chat_history_text}\n"
+        )
+        summary = await self.send_prompt(event, extra_prompt=task_prompt)
+        
+        # 3. 更新状态并清零计数器
+        # self.current_state = new_state
+        self.new_message_count = 0
+        self.current_state = f"<recent_chat_summary>{summary}</recent_chat_summary>"
+
+    async def send_prompt(self, event, extra_prompt=""):
+        uid = event.unified_msg_origin
+        # provider_id = await self.context.get_current_chat_provider_id(uid)
+        # logger.info(f"uid:{uid}")
+
+        #获取人格
+        # system_prompt = await self.get_persona_system_prompt(uid)
+        person_prompt = await self.context.persona_manager.get_default_persona_v3(uid)
+        if not person_prompt:
+            person_prompt = self.context.provider_manager.selected_default_persona["prompt"]
+
+        #发送信息到llm
+        sys_msg = f"{person_prompt}"
+        provider = self.context.get_using_provider()
+        llm_resp = await provider.text_chat(
+                prompt=extra_prompt,
+                session_id=None,
+                contexts=history,
+                image_urls=[],
+                func_tool=None,
+                system_prompt=sys_msg,
+            )
+        # await conv_mgr.add_message_pair(
+        #     cid=curr_cid,
+        #     user_message=user_msg,
+        #     assistant_message=AssistantMessageSegment(
+        #         content=[TextPart(text=llm_resp.completion_text)]
+        #     ),
+        # )
+        return llm_resp.completion_text
+
+    def view_recent_messages(self):
+        logger.info(list(self.recent_messages))
+
 @register("LivelyState", "兔子", "这是一个让角色拥有持续状态记忆的拟人插件：不再每句“重开存档”，而是带着上一刻的心情继续和你说话。", "v1.0.0")
 class LivelyState(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.context = context
         self.global_state = CharacterState()
-
+        self.global_observer = GlobalObserver()
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -146,12 +224,35 @@ class LivelyState(Star):
     async def add_state(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
         uid = event.unified_msg_origin
         # ori_system_prompt = req.system_prompt or ""'
-        ori_msg = req.prompt
-        # logger.info(f"原系统提示词_LivelyState:{ori_system_prompt}")
+        ori_prompt = req.prompt
+        
+        #获取会话历史
+        conv_mgr = self.context.conversation_manager
+        try:
+            curr_cid = await conv_mgr.get_curr_conversation_id(uid)
+            conversation = await conv_mgr.get_conversation(uid, curr_cid)  # Conversation
+        except Exception as e:
+            logger.error(f"获取会话历史失败: {e}")
+            return f"获取会话历史失败: {e}" 
+        history = json.loads(conversation.history) if conversation and conversation.history else []
+        if history[-1]["role"] == "assistant":
+            last_reply = [msg.get("text", "") 
+                          for msg in history[-1].get("content", [])
+                          if msg.get("type") == "text"]
+            last_reply_text = "[role:assistant]:" + "\n".join(last_reply)
+            self.global_observer.add_message(last_reply_text)
+        elif history[-2]["role"] == "assistant":
+            last_reply = [msg.get("text", "") 
+                          for msg in history[-2].get("content", [])
+                          if msg.get("type") == "text"]
+            last_reply_text = "[role:assistant]," + "\n".join(last_reply)
+            self.global_observer.add_message(last_reply_text)
+        else:
+            logger.warning("无法找到上一条助手回复，不更新状态观察器。")
 
-        # logger.info(f"状态提示词发送完毕，收到回复\n{llm_response}")
-        # report = self._handle_apply(event, llm_response)
-        # logger.info("State update report: %s", report)
+        message_str = event.message_str
+        self.global_observer.add_message(f"[role:user,uid:{uid}]: {message_str}")
+
         state_info = self.global_state.get_whole_state()
         current_physical_state = state_info.get("physical_state", "Idle")
         target_id = state_info.get("target_id", "none")
@@ -161,6 +262,19 @@ class LivelyState(Star):
         else:
             target_note = f"This state is tied to user {target_id}."
         
+        state_sys_prompt = (
+            f"### Response Workflow [MANDATORY]\n"
+            f"- 先判断是否需要更新状态；若需要，先调用工具，再进行正常回复。\n"
+            f"- 正常回复必须与最新状态一致。\n\n"
+            f"### 回复风格规则\n"
+            f"- 回复必须体现当前状态（{current_physical_state}）与情绪（{state_info['emotion']}）。\n"
+            f"- 若处于进行中的体力活动，需在聊天中体现“仍在该活动中”。\n"
+            f"- 若 energy_level < 30，语气和措辞需体现明显疲惫。\n"
+            f"- 若 thirst > 70，角色在互动中应隐约体现出更强烈的渴求感；thirst < 20 时则几乎不体现。\n"
+            f"- 情绪变化需渐进（情绪惯性），避免突然跳变。\n"
+            f"- 同一状态对所有用户保持一致，不因对象不同而自相矛盾。\n\n"
+        )
+
         state_prompt = (
             f"\n## Character State Constraints [MANDATORY]\n\n"
             f"- Time Since Last Update: {time_elapsed:.1f}s\n\n"
@@ -172,16 +286,6 @@ class LivelyState(Star):
             f"**Target ID**: {target_id} (who this state is associated with; 'none' means global)\n"
             f"**Last State Update Reason**: {state_info.get('update_reason', 'unspecified')}\n"
             f"**Association Note**: {target_note}\n\n"
-            f"### Response Workflow [MANDATORY]\n"
-            f"- 先判断是否需要更新状态；若需要，先调用工具，再进行正常回复。\n"
-            f"- 正常回复必须与最新状态一致。\n\n"
-            f"### 回复风格规则\n"
-            f"- 回复必须体现当前状态（{current_physical_state}）与情绪（{state_info['emotion']}）。\n"
-            f"- 若处于进行中的体力活动，需在聊天中体现“仍在该活动中”。\n"
-            f"- 若 energy_level < 30，语气和措辞需体现明显疲惫。\n"
-            f"- 若 thirst > 70，角色在互动中应隐约体现出更强烈的渴求感；thirst < 20 时则几乎不体现。\n"
-            f"- 情绪变化需渐进（情绪惯性），避免突然跳变。\n"
-            f"- 同一状态对所有用户保持一致，不因对象不同而自相矛盾。\n\n"
             # f"### 使用建议（给 LLM 的决策规则）\n"
             # f"- 【核心原则：抓大放小】只有当发生重大场景转移（如出门/回家）、大段活动切换（如从工作切到睡觉、从日常聊天切到出门运动）或剧烈情绪/能量变化时，才调用 apply_state_transition。\n"
             # f"- 【禁止频繁调用】同一场景内的连续微小动作（如倒水、换个姿势躺着、脱衣服洗澡、关灯等），禁止调用工具；直接在文本回复的动作描写中体现即可。\n"
@@ -197,7 +301,8 @@ class LivelyState(Star):
             f"- 状态信息是事实基准（GROUND TRUTH），你的回复必须与其一致。"
         )
         # logger.info(f"当前状态信息:{state_prompt}")
-        req.prompt = f"[<global_state>{state_prompt}]\n</global_state>\n{ori_msg}"
+        req.system_prompt = (req.system_prompt or "") + state_sys_prompt
+        req.prompt = f"{self.global_observer.current_state}\n[<global_state>{state_prompt}]\n</global_state>\n{ori_prompt}"
         # logger.info(f"当前系统提示词——LivelyState: {req.system_prompt}")
 
     def _handle_apply(self, event, payload: dict) -> str:
