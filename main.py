@@ -252,7 +252,7 @@ class LivelyState(Star):
 
         message_str = event.message_str
         self.global_observer.add_message(f"[role:user,uid:{uid}]: {message_str}")
-
+        self.global_observer.view_recent_messages()
         state_info = self.global_state.get_whole_state()
         current_physical_state = state_info.get("physical_state", "Idle")
         target_id = state_info.get("target_id", "none")
