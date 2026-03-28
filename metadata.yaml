@@ -1,6 +1,6 @@
 name: astrbot_plugin_LivelyState # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
 display_name:  角色状态记忆 # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
 desc: 这是一个让角色拥有持续状态记忆的拟人插件：不再每句“重开存档”，而是带着上一刻的心情继续和你说话。 # 插件简短描述
-version: v1.0.0 # 插件版本号。格式：v1.1.1 或者 v1.1
+version: v1.1.0 # 插件版本号。格式：v1.1.1 或者 v1.1
 author: 兔子 # 作者
 repo: https://github.com/KonmaKanSinPack/astrbot_plugin_LivelyState # 插件的仓库地址
