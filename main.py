@@ -238,13 +238,13 @@ class LivelyState(Star):
         if len(history) >=2:
             logger.info(f"上一个会话历史: {(history[-1])}")
             if history[-1]["role"] == "assistant":
-                last_reply = [msg
+                last_reply = [msg.get("text", "")
                             for msg in history[-1].get("content", [])
                             if isinstance(msg, Dict) and msg.get("type") == "text"]
                 last_reply_text = "[role:assistant]:" + "\n".join(last_reply)
                 self.global_observer.add_message(last_reply_text)
             elif history[-2]["role"] == "assistant":
-                last_reply = [msg
+                last_reply = [msg.get("text", "")
                             for msg in history[-2].get("content", [])
                             if isinstance(msg, Dict) and msg.get("type") == "text"]
                 last_reply_text = "[role:assistant]," + "\n".join(last_reply)
