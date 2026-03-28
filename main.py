@@ -241,13 +241,13 @@ class LivelyState(Star):
                 last_reply = [msg.get("text", "")
                             for msg in history[-1].get("content", [])
                             if isinstance(msg, Dict) and msg.get("type") == "text"]
-                last_reply_text = "[role:assistant]:" + "\n".join(last_reply)
+                last_reply_text = f"[role:assistant,reply to user:uid:{uid}]: " + "\n".join(last_reply)
                 await self.global_observer.add_message(last_reply_text)
             elif history[-2]["role"] == "assistant":
                 last_reply = [msg.get("text", "")
                             for msg in history[-2].get("content", [])
                             if isinstance(msg, Dict) and msg.get("type") == "text"]
-                last_reply_text = "[role:assistant]," + "\n".join(last_reply)
+                last_reply_text = f"[role:assistant,reply to user:uid:{uid}]: " + "\n".join(last_reply)
                 await self.global_observer.add_message(last_reply_text)
             else:
                 logger.warning("无法找到上一条助手回复，不更新状态观察器。")
