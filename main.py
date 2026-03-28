@@ -131,7 +131,7 @@ class GlobalObserver:
         llm_resp = await provider.text_chat(
                 prompt=extra_prompt,
                 session_id=None,
-                contexts=history,
+                contexts="",
                 image_urls=[],
                 func_tool=None,
                 system_prompt=sys_msg,
@@ -235,16 +235,17 @@ class LivelyState(Star):
             logger.error(f"获取会话历史失败: {e}")
             return f"获取会话历史失败: {e}" 
         history = json.loads(conversation.history) if conversation and conversation.history else []
+        logger.info(f"当前会话历史: {(history)}")
         if history[-1]["role"] == "assistant":
-            last_reply = [msg.get("text", "") 
+            last_reply = [msg
                           for msg in history[-1].get("content", [])
-                          if msg.get("type") == "text"]
+                          ]
             last_reply_text = "[role:assistant]:" + "\n".join(last_reply)
             self.global_observer.add_message(last_reply_text)
         elif history[-2]["role"] == "assistant":
-            last_reply = [msg.get("text", "") 
+            last_reply = [msg
                           for msg in history[-2].get("content", [])
-                          if msg.get("type") == "text"]
+                          ]
             last_reply_text = "[role:assistant]," + "\n".join(last_reply)
             self.global_observer.add_message(last_reply_text)
         else:
