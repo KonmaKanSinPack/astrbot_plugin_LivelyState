@@ -1,4 +1,4 @@
-from collections import deque
+# from collections import deque
 import json
 import time
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
