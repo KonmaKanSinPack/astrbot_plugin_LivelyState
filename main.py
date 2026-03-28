@@ -230,6 +230,7 @@ class LivelyState(Star):
     @filter.on_llm_request()
     async def add_state(self, event: AstrMessageEvent, req: ProviderRequest) -> MessageEventResult:
         uid = event.unified_msg_origin
+        user_name = event.get_sender_name()
         # ori_system_prompt = req.system_prompt or ""'
         ori_prompt = req.prompt
         
@@ -248,20 +249,20 @@ class LivelyState(Star):
                 last_reply = [msg.get("text", "")
                             for msg in history[-1].get("content", [])
                             if isinstance(msg, Dict) and msg.get("type") == "text"]
-                last_reply_text = f"[role:assistant,reply to user:uid:{uid}]: " + "\n".join(last_reply)
+                last_reply_text = f"[role:assistant,reply to user:name:{user_name}]: " + "\n".join(last_reply)
                 await self.global_observer.add_message(last_reply_text, event, self.context)
             elif history[-2]["role"] == "assistant":
                 last_reply = [msg.get("text", "")
                             for msg in history[-2].get("content", [])
                             if isinstance(msg, Dict) and msg.get("type") == "text"]
-                last_reply_text = f"[role:assistant,reply to user:uid:{uid}]: " + "\n".join(last_reply)
+                last_reply_text = f"[role:assistant,reply to user:name:{user_name}]: " + "\n".join(last_reply)
                 await self.global_observer.add_message(last_reply_text, event, self.context)
             else:
                 logger.warning("无法找到上一条助手回复，不更新状态观察器。")
 
         message_str = event.message_str
-        await self.global_observer.add_message(f"[role:user,uid:{uid}]: {message_str}", event, self.context)
-        logger.info(f"Added message to observer: [role:user,uid:{uid}]: {message_str}")
+        await self.global_observer.add_message(f"[role:user,name:{user_name}]: {message_str}", event, self.context)
+        # logger.info(f"Added message to observer: [role:user,uid:{uid}]: {message_str}")
         self.global_observer.view_recent_messages()
         state_info = self.global_state.get_whole_state()
         current_physical_state = state_info.get("physical_state", "Idle")
