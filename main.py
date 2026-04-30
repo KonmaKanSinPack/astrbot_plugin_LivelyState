@@ -178,6 +178,10 @@ class CharacterState:
             # 这样你可以直接在模板里定义应该有哪些默认字段。
             "Body_Sheet": profile_template["Body_Sheet"],
             "History": profile_template["History"],
+            # 这两个字段只用于硬冷却判断，不参与角色设定本身。
+            # 单独记录是为了避免自然状态推进刷新 LastUpdateTime 后，误伤真正的工具冷却逻辑。
+            "_last_fast_state_update_time": 0.0,
+            "_last_body_sheet_update_time": 0.0,
         }
 
     def normalize_body_sheet(self, body_sheet: Any) -> Dict[str, Dict[str, str]]:
@@ -324,6 +328,12 @@ class CharacterState:
             text = str(value).strip() if value is not None else ""
             return text or fallback
 
+        def _safe_float(value: Any, fallback: float) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return fallback
+
         normalized = {
             "LastUpdateTime": default_state["LastUpdateTime"],
             "emotion": _safe_text(state.get("emotion"), default_state["emotion"]),
@@ -347,6 +357,8 @@ class CharacterState:
                 **profile_template.get("History", default_state["History"]),
                 **self.normalize_history(state.get("History", default_state["History"])),
             },
+            "_last_fast_state_update_time": _safe_float(state.get("_last_fast_state_update_time"), 0.0),
+            "_last_body_sheet_update_time": _safe_float(state.get("_last_body_sheet_update_time"), 0.0),
         }
 
         try:
@@ -557,6 +569,8 @@ class LivelyState(Star):
         super().__init__(context)
         self.context = context
         self.config = config
+        self.fast_state_cooldown_sec = max(0, int(config.get("fast_state_cooldown_sec", 300)))
+        self.body_sheet_cooldown_sec = max(0, int(config.get("body_sheet_cooldown_sec", 1800)))
         self.global_state = CharacterState(
             update_interval_sec=config.get("auto_update_interval_sec", 300),
             active_state_timeout_sec=config.get("active_state_timeout_sec", 1800),
@@ -573,6 +587,14 @@ class LivelyState(Star):
         也方便 `/state_check` 直接展示嵌套字段。
         """
         return json.dumps(data or {}, ensure_ascii=False, indent=2, sort_keys=True)
+
+    def _to_public_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """过滤内部冷却元数据，避免直接暴露给用户。"""
+        return {
+            key: value
+            for key, value in (state or {}).items()
+            if not str(key).startswith("_")
+        }
 
     def _build_state_style_rules(self, state_info: Dict[str, Any]) -> str:
         """把数值状态转换成更稳定的回复约束。
@@ -716,7 +738,7 @@ class LivelyState(Star):
 
         使用建议（给 LLM 的决策规则）：
         - 【核心原则：抓大放小】只有当发生重大场景转移（如出门/回家）、大段活动切换（如从工作切到睡觉、从日常聊天切到出门运动）或剧烈情绪/能量变化时，才调用 apply_state_transition。
-        - 【调用冷却】同一场景内的状态更新至少间隔 300 秒以上，禁止频繁地调用工具。
+        - 【调用冷却】快状态更新默认存在 300 秒硬冷却；Body_Sheet 默认存在 1800 秒硬冷却
         - 【禁止频繁调用】同一场景内的连续微小动作（如倒水、换个姿势躺着、脱衣服洗澡、关灯等），禁止调用工具；直接在文本回复的动作描写中体现即可。
         - 【判定冲突标准】只有当你准备回复的内容与当前状态存在根本性矛盾（例如当前状态是“在外面跑步”，但你要回复“在床上睡觉”）时，才必须先调用工具。细微姿势或交互改变不算冲突。
         - 距离上次更新已过较长时间，且当前活动按常理应自然结束或转场时调用。
@@ -724,6 +746,7 @@ class LivelyState(Star):
         - `body_sheet_updates` 属于长期身体档案的局部更新，只在明确设定、持久性身体变化或需要补录长期事实时使用。
         - `history_delta` 属于历史计数的增量更新，只在某个事件已经真实发生后再增加对应计数。
         - 普通动作、临时姿势、瞬时感受不要写进 `body_sheet_updates`；普通口头描述、想象、铺垫也不要改 `history_delta`。
+        - `history_delta` 只能更新当前已注册的 History 键名；
         - 如果只需要补录 Body_Sheet 或 History，而不需要切换当前 physical_state，也可以单独调用本工具，并填写 `update_reason` 说明原因。
         - 由于工具参数类型限制，`body_sheet_updates` 和 `history_delta` 必须传 JSON 字符串，而不是嵌套对象。
 
@@ -774,7 +797,7 @@ class LivelyState(Star):
 
     @filter.command("state_check")
     async def state_check(self, event: AstrMessageEvent) -> MessageEventResult:
-        pretty_state = self._format_structured_state_block(self.global_state.get_whole_state())
+        pretty_state = self._format_structured_state_block(self._to_public_state(self.global_state.get_whole_state()))
         await self.context.send_message(event.unified_msg_origin, MessageChain().message(f"当前状态信息：\n{pretty_state}"))
         event.stop_event()
 
@@ -953,6 +976,14 @@ class LivelyState(Star):
         if isinstance(history_delta, dict) and history_delta and not normalized_history_delta:
             return "Update Failed：history_delta 至少需要包含一个合法的非负整数增量"
 
+        current_history = self.global_state.normalize_history(current_state.get("History", {}))
+        unknown_history_keys = sorted(set(normalized_history_delta.keys()) - set(current_history.keys()))
+        if unknown_history_keys:
+            return (
+                "Update Failed：history_delta 包含未注册的计数字段 "
+                f"{', '.join(unknown_history_keys)}；请先在 state_profile_template.json 中定义它们"
+            )
+
         has_scalar_update = any(payload.get(field_name) is not None for field_name in [
             "emotion", "energy_level", "thirst", "physical_state", "update_reason", "target_id"
         ])
@@ -980,31 +1011,67 @@ class LivelyState(Star):
 
         reason = _safe_text(payload.get("update_reason"), current_state.get("update_reason", "无理由说明。"))
         target_id = _safe_text(payload.get("target_id"), current_state.get("target_id", "none"))
-        merged_body_sheet = self.global_state.merge_body_sheet(current_state.get("Body_Sheet", {}), normalized_body_sheet_updates)
-        merged_history = self.global_state.apply_history_delta(current_state.get("History", {}), normalized_history_delta)
-        should_refresh_state_clock = any(payload.get(field_name) is not None for field_name in [
-            "emotion", "energy_level", "thirst", "physical_state", "target_id"
+        current_energy_level = _clamp_int(current_state.get("energy_level"), 100)
+        current_thirst = _clamp_int(current_state.get("thirst"), 0)
+        next_emotion = _safe_text(payload.get("emotion"), current_state.get("emotion", "Normal"))
+        next_energy_level = _clamp_int(payload.get("energy_level"), current_energy_level)
+        next_thirst = _clamp_int(payload.get("thirst"), current_thirst)
+        next_target_id = target_id
+        current_body_sheet = self.global_state.normalize_body_sheet(current_state.get("Body_Sheet", {}))
+        merged_body_sheet = self.global_state.merge_body_sheet(current_body_sheet, normalized_body_sheet_updates)
+        merged_history = self.global_state.apply_history_delta(current_history, normalized_history_delta)
+
+        has_effective_fast_state_change = any([
+            next_emotion != current_state.get("emotion", "Normal"),
+            next_energy_level != current_energy_level,
+            next_thirst != current_thirst,
+            normalized_physical_state != current_state.get("physical_state", "Idle"),
+            next_target_id != current_state.get("target_id", "none"),
         ])
+        has_effective_body_sheet_change = merged_body_sheet != current_body_sheet
+        has_effective_history_change = merged_history != current_history
+
+        if not has_effective_fast_state_change and not has_effective_body_sheet_change and not has_effective_history_change:
+            return "Update Failed：未检测到实际状态变化"
+
+        now = time.time()
+        if has_effective_fast_state_change and self.fast_state_cooldown_sec > 0:
+            elapsed_fast_update = max(0.0, now - float(current_state.get("_last_fast_state_update_time", 0.0)))
+            if elapsed_fast_update < self.fast_state_cooldown_sec:
+                return (
+                    "Update Failed：快状态更新冷却中，"
+                    f"还需等待 {self.fast_state_cooldown_sec - elapsed_fast_update:.1f} 秒"
+                )
+
+        if has_effective_body_sheet_change and self.body_sheet_cooldown_sec > 0:
+            elapsed_body_sheet_update = max(0.0, now - float(current_state.get("_last_body_sheet_update_time", 0.0)))
+            if elapsed_body_sheet_update < self.body_sheet_cooldown_sec:
+                return (
+                    "Update Failed：Body_Sheet 更新冷却中，"
+                    f"还需等待 {self.body_sheet_cooldown_sec - elapsed_body_sheet_update:.1f} 秒"
+                )
         
         new_state_data = {
             # 慢变化字段不应该顺手把身体状态的时间轴重置掉；
             # 只有快状态真的发生变化时才刷新 LastUpdateTime。
-            "LastUpdateTime": time.time() if should_refresh_state_clock else current_state.get("LastUpdateTime", time.time()),
-            "emotion": _safe_text(payload.get("emotion"), current_state.get("emotion", "Normal")),
-            "energy_level": _clamp_int(payload.get("energy_level"), _clamp_int(current_state.get("energy_level"), 100)),
-            "thirst": _clamp_int(payload.get("thirst"), _clamp_int(current_state.get("thirst"), 0)),
+            "LastUpdateTime": now if has_effective_fast_state_change else current_state.get("LastUpdateTime", now),
+            "emotion": next_emotion,
+            "energy_level": next_energy_level,
+            "thirst": next_thirst,
             "physical_state": normalized_physical_state,
             "update_reason": reason,
-            "target_id": target_id,
+            "target_id": next_target_id,
             "Body_Sheet": merged_body_sheet,
             "History": merged_history,
+            "_last_fast_state_update_time": now if has_effective_fast_state_change else float(current_state.get("_last_fast_state_update_time", 0.0)),
+            "_last_body_sheet_update_time": now if has_effective_body_sheet_change else float(current_state.get("_last_body_sheet_update_time", 0.0)),
         }
             # Ensure required fields exist and are normalized
             
             # Persist state
         self.global_state.save(new_state_data)
         logger.info(f"查看新数据：{new_state_data}")
-        report = f"状态已更新，原因：{reason}，状态：{self.global_state.get_whole_state(enable_update=False)}"
+        report = f"状态已更新，原因：{reason}，状态：{self._to_public_state(self.global_state.get_whole_state(enable_update=False))}"
         
         return report
 

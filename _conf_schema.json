@@ -18,5 +18,15 @@
         "description": "进行中状态的自然超时时间（秒）。超过后会自动回落到 Idle，避免状态长期卡死",
         "type": "int",
         "default": 1800
+    },
+    "fast_state_cooldown_sec":{
+        "description": "快状态工具更新的硬冷却时间（秒）。冷却中会拒绝再次更新 emotion、energy_level、thirst、physical_state、target_id",
+        "type": "int",
+        "default": 300
+    },
+    "body_sheet_cooldown_sec":{
+        "description": "Body_Sheet 更新的硬冷却时间（秒）。冷却中会拒绝再次写入长期身体档案",
+        "type": "int",
+        "default": 1800
     }
 }

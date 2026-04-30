@@ -193,6 +193,20 @@ pip install -r requirements.txt
 
 这两类字段都不适合高频调用。普通动作、临时姿势、当前回合的一次口头描写，应该只体现在回复文本中，不应写回长期档案。
 
+### 3.1) 硬冷却与高频更新保护
+
+现在插件不再只依赖提示词约束，而是增加了代码级的硬冷却：
+
+-   **快状态硬冷却**：`emotion`、`energy_level`、`thirst`、`physical_state`、`target_id` 的有效更新，默认 `300` 秒内只能成功一次。
+-   **Body_Sheet 硬冷却**：长期身体档案的有效更新，默认 `1800` 秒内只能成功一次。
+-   **History 白名单**：`history_delta` 只能更新当前已经注册的计数字段；如果需要新计数项，先在 [state_profile_template.json](state_profile_template.json) 里定义。
+
+这三层保护的目标是：
+
+-   避免模型在一个场景里反复重写同一份身体状态。
+-   避免长期身体档案被短时动作污染。
+-   避免 History 被模型临时发明出新的计数项。
+
 ### 4) 状态自然流转（由时间驱动）
 
 插件会按固定时间步长自动推进状态：
@@ -209,6 +223,8 @@ pip install -r requirements.txt
 -   `trigger_threshold`：累计多少条新消息后触发一次全局总结。
 -   `auto_update_interval_sec`：状态自然流转的时间步长，默认 `300` 秒。
 -   `active_state_timeout_sec`：进行中状态的自然超时时间，默认 `1800` 秒。
+-   `fast_state_cooldown_sec`：快状态工具更新的硬冷却时间，默认 `300` 秒。
+-   `body_sheet_cooldown_sec`：Body_Sheet 更新的硬冷却时间，默认 `1800` 秒。
 
 ## 🏷️ 元信息
 
