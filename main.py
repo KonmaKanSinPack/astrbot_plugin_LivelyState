@@ -720,8 +720,18 @@ class LivelyState(Star):
         - 【禁止频繁调用】同一场景内的连续微小动作（如倒水、换个姿势躺着、脱衣服洗澡、关灯等），禁止调用工具；直接在文本回复的动作描写中体现即可。
         - 【判定冲突标准】只有当你准备回复的内容与当前状态存在根本性矛盾（例如当前状态是“在外面跑步”，但你要回复“在床上睡觉”）时，才必须先调用工具。细微姿势或交互改变不算冲突。
         - 距离上次更新已过较长时间，且当前活动按常理应自然结束或转场时调用。
+        - `emotion / energy_level / thirst / physical_state / target_id` 属于快状态，用来更新当前情绪、体力、欲望和身体状态。
+        - `body_sheet_updates` 属于长期身体档案的局部更新，只在明确设定、持久性身体变化或需要补录长期事实时使用。
+        - `history_delta` 属于历史计数的增量更新，只在某个事件已经真实发生后再增加对应计数。
+        - 普通动作、临时姿势、瞬时感受不要写进 `body_sheet_updates`；普通口头描述、想象、铺垫也不要改 `history_delta`。
+        - 如果只需要补录 Body_Sheet 或 History，而不需要切换当前 physical_state，也可以单独调用本工具，并填写 `update_reason` 说明原因。
 
         支持部分更新：只传入发生变化的字段即可，未传入字段会沿用旧值。
+
+        推荐格式示例：
+        - 更新快状态：`{"physical_state": "Resting", "energy_level": 42, "update_reason": "运动结束后开始休息"}`
+        - 更新身体档案：`{"body_sheet_updates": {"Breasts": {"Status": "轻微发胀"}}, "update_reason": "补录持续性身体变化"}`
+        - 更新历史计数：`{"history_delta": {"Orgasm_Count": 1}, "update_reason": "该事件刚刚实际发生"}`
 
         Args:
             emotion (str, optional): 情绪状态。
