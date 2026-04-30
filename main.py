@@ -708,8 +708,8 @@ class LivelyState(Star):
                                 physical_state: Optional[str] = None,
                                 update_reason: Optional[str] = None,
                                 target_id: Optional[str] = None,
-                                body_sheet_updates: Optional[Dict[str, Dict[str, str]]] = None,
-                                history_delta: Optional[Dict[str, int]] = None,
+                                body_sheet_updates: Optional[str] = None,
+                                history_delta: Optional[str] = None,
                                 ) -> MessageEventResult:
 
         '''更新当前角色状态（持久化）。
@@ -725,13 +725,14 @@ class LivelyState(Star):
         - `history_delta` 属于历史计数的增量更新，只在某个事件已经真实发生后再增加对应计数。
         - 普通动作、临时姿势、瞬时感受不要写进 `body_sheet_updates`；普通口头描述、想象、铺垫也不要改 `history_delta`。
         - 如果只需要补录 Body_Sheet 或 History，而不需要切换当前 physical_state，也可以单独调用本工具，并填写 `update_reason` 说明原因。
+        - 由于工具参数类型限制，`body_sheet_updates` 和 `history_delta` 必须传 JSON 字符串，而不是嵌套对象。
 
         支持部分更新：只传入发生变化的字段即可，未传入字段会沿用旧值。
 
         推荐格式示例：
         - 更新快状态：`{"physical_state": "Resting", "energy_level": 42, "update_reason": "运动结束后开始休息"}`
-        - 更新身体档案：`{"body_sheet_updates": {"Breasts": {"Status": "轻微发胀"}}, "update_reason": "补录持续性身体变化"}`
-        - 更新历史计数：`{"history_delta": {"Orgasm_Count": 1}, "update_reason": "该事件刚刚实际发生"}`
+        - 更新身体档案：`{"body_sheet_updates": "{\"Breasts\": {\"Status\": \"轻微发胀\"}}", "update_reason": "补录持续性身体变化"}`
+        - 更新历史计数：`{"history_delta": "{\"Orgasm_Count\": 1}", "update_reason": "该事件刚刚实际发生"}`
 
         Args:
             emotion (str, optional): 情绪状态。
@@ -743,10 +744,10 @@ class LivelyState(Star):
             update_reason (str, optional): 状态更新原因。
             target_id (str, optional): 当前关注对象 ID。它只表示“此刻主要在和谁互动”，
                 不代表存在另一套独立状态；身体状态和情绪状态始终是全局唯一的。
-            body_sheet_updates (Dict[str, Dict[str, str]], optional): 长期身体档案的局部更新。
+            body_sheet_updates (str, optional): 长期身体档案的局部更新，需传 JSON 字符串对象。
                 只在明确设定、持久性变化或需要补录身体事实时使用；普通动作描写不要写进这里。
-            history_delta (Dict[str, int], optional): 历史计数的增量更新。
-                这里传入的是“本次增加多少”，不是最新总数，例如 {"1_Count": 1} 表示该计数加 1。
+            history_delta (str, optional): 历史计数的增量更新，需传 JSON 字符串对象。
+                这里传入的是“本次增加多少”，不是最新总数，例如 `{"1_Count": 1}` 表示该计数加 1。
         '''
         
 
@@ -835,6 +836,37 @@ class LivelyState(Star):
         req.prompt = "\n".join(prompt_sections)
         # logger.info(f"当前系统提示词——LivelyState: {req.system_prompt}")
 
+    def _parse_tool_json_object_arg(self, raw_value: Any, field_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """把 llm_tool 里的 JSON 字符串参数解析成对象。
+
+        AstrBot 的工具注册不接受这两个字段的嵌套 Dict 类型，
+        所以这里改为 string 入参，再在函数内部做一次宽松解析。
+        """
+        if raw_value is None:
+            return None, None
+
+        if isinstance(raw_value, dict):
+            return raw_value, None
+
+        if not isinstance(raw_value, str):
+            return None, f"{field_name} 必须是 JSON 字符串对象"
+
+        stripped = raw_value.strip()
+        if not stripped:
+            return None, None
+
+        json_text = self._extract_json_block(stripped) or stripped
+
+        try:
+            parsed_value = json_repair.loads(json_text)
+        except Exception as e:
+            return None, f"{field_name} 不是合法的 JSON 对象字符串: {e}"
+
+        if not isinstance(parsed_value, dict):
+            return None, f"{field_name} 必须解析为对象"
+
+        return parsed_value, None
+
     def _handle_apply(self, event, payload: dict) -> str:
         if not payload:
             return "请提供大模型返回的 Dict 内容。"
@@ -897,17 +929,25 @@ class LivelyState(Star):
             text = str(value).strip()
             return text or fallback
 
-        body_sheet_updates = payload.get("body_sheet_updates")
-        if body_sheet_updates is not None and not isinstance(body_sheet_updates, dict):
-            return "Update Failed：body_sheet_updates 必须是对象"
+        raw_body_sheet_updates = payload.get("body_sheet_updates")
+        body_sheet_updates, body_sheet_parse_error = self._parse_tool_json_object_arg(
+            raw_body_sheet_updates,
+            "body_sheet_updates",
+        )
+        if body_sheet_parse_error:
+            return f"Update Failed：{body_sheet_parse_error}"
 
         normalized_body_sheet_updates = self.global_state.normalize_body_sheet(body_sheet_updates)
         if isinstance(body_sheet_updates, dict) and body_sheet_updates and not normalized_body_sheet_updates:
             return "Update Failed：body_sheet_updates 至少需要包含一个合法的部位与属性描述"
 
-        history_delta = payload.get("history_delta")
-        if history_delta is not None and not isinstance(history_delta, dict):
-            return "Update Failed：history_delta 必须是对象"
+        raw_history_delta = payload.get("history_delta")
+        history_delta, history_delta_parse_error = self._parse_tool_json_object_arg(
+            raw_history_delta,
+            "history_delta",
+        )
+        if history_delta_parse_error:
+            return f"Update Failed：{history_delta_parse_error}"
 
         normalized_history_delta = self.global_state.normalize_history(history_delta)
         if isinstance(history_delta, dict) and history_delta and not normalized_history_delta:

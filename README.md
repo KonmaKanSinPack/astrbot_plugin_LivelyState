@@ -188,8 +188,8 @@ pip install -r requirements.txt
 
 现在 `apply_state_transition` 还支持两类低频更新：
 
--   `body_sheet_updates`：对 `Body_Sheet` 做局部合并更新，只补改指定部位和属性，不覆盖整份档案。
--   `history_delta`：对 `History` 做增量累加，例如传入 `{ "1_Count": 1 }` 表示把该计数加一。
+-   `body_sheet_updates`：对 `Body_Sheet` 做局部合并更新，只补改指定部位和属性，不覆盖整份档案。由于工具参数限制，这里需要传 JSON 字符串。
+-   `history_delta`：对 `History` 做增量累加。由于工具参数限制，这里需要传 JSON 字符串，例如 `"{\"1_Count\": 1}"` 表示把该计数加一。
 
 这两类字段都不适合高频调用。普通动作、临时姿势、当前回合的一次口头描写，应该只体现在回复文本中，不应写回长期档案。
 
