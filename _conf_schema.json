@@ -22,11 +22,11 @@
     "fast_state_cooldown_sec":{
         "description": "快状态工具更新的硬冷却时间（秒）。冷却中会拒绝再次更新 emotion、energy_level、thirst、physical_state、target_id",
         "type": "int",
-        "default": 300
+        "default": 60
     },
     "body_sheet_cooldown_sec":{
         "description": "Body_Sheet 更新的硬冷却时间（秒）。冷却中会拒绝再次写入长期身体档案",
         "type": "int",
-        "default": 1800
+        "default": 180
     }
 }

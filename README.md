@@ -69,10 +69,15 @@
 底层数据结构已全面升级，当前维护以下核心字段：
 
 -   `LastUpdateTime`：最近更新时间戳（秒级）
+-   `updated_at`：最近更新时间的可读文本，方便模型判断“刚刚发生”还是“已经过去一段时间”
 -   `emotion`：情绪状态（如 Normal, Happy, Tired）
 -   `energy_level`：体力值（0-100 整数，<30 时角色会表现出疲惫）
 -   `thirst`：欲望/渴求值（0-100 整数，影响角色互动的迫切感）
 -   `physical_state`：当前物理/行为状态（如 Idle, Sleeping, Running）
+-   `location`：轻量地点锚点（如 `bed`、`sofa`、`desk`、`outdoor`）
+-   `post_event_markers`：最近事件后的上下文锚点数组，用来保留“刚洗完澡 / 刚到家 / 还没收拾桌面”这类状态尾迹
+-   `last_event`：最近一次重要事件的结构化摘要对象，适合记录事件类型、参与对象、备注等；一旦填写，内部应带 `subject_id`，若无强相关 ID 则填 `global`
+-   `pending_tasks`：当前待办数组，用来维持短期故事线连续性
 -   `update_reason`：状态更新原因（由 LLM 填写）
 -   `target_id`：状态关联目标（`none` 表示全局状态，其他为特定用户 ID）
 -   `Body_Sheet`：长期身体档案，使用嵌套对象保存稳定的身体属性与部位状态。
@@ -83,10 +88,15 @@
 ```json
 {
   "LastUpdateTime": 1711500000.0,
+  "updated_at": "2024-03-27 12:00:00",
   "emotion": "Normal",
   "energy_level": 100,
   "thirst": 0,
   "physical_state": "Idle",
+  "location": "",
+  "post_event_markers": [],
+  "last_event": {},
+  "pending_tasks": [],
   "update_reason": "Initial state",
   "target_id": "none",
   "Body_Sheet": {},
@@ -188,6 +198,8 @@ pip install -r requirements.txt
 
 现在 `apply_state_transition` 还支持两类低频更新：
 
+-   `location`：给当前状态补一个轻量地点锚点，避免只有 `Resting` 却不知道是在床上、沙发上还是书桌前。
+-   `post_event_markers` / `last_event` / `pending_tasks`：为状态快照补充“刚发生过什么、目前还挂着什么后续动作”的上下文锚点；由于工具参数限制，`post_event_markers` 和 `pending_tasks` 需要 JSON 字符串数组，`last_event` 需要 JSON 字符串对象，且对象内应包含 `subject_id`，若无强相关 ID 则填 `global`。
 -   `body_sheet_updates`：对 `Body_Sheet` 做局部合并更新，只补改指定部位和属性，不覆盖整份档案。由于工具参数限制，这里需要传 JSON 字符串。
 -   `history_delta`：对 `History` 做增量累加。由于工具参数限制，这里需要传 JSON 字符串，例如 `"{\"1_Count\": 1}"` 表示把该计数加一。
 

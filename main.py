@@ -166,12 +166,18 @@ class CharacterState:
     
     def default_state(self) -> Dict[str, Any]:
         profile_template = self.load_profile_template()
+        current_time = time.time()
         return {
-            "LastUpdateTime": time.time(),
+            "LastUpdateTime": current_time,
+            "updated_at": self.format_timestamp(current_time),
             "emotion": "Normal",
             "energy_level": 100,
             "thirst": 0,
             "physical_state": "Idle",
+            "location": "",
+            "post_event_markers": [],
+            "last_event": {},
+            "pending_tasks": [],
             "update_reason": "Initial state",
             "target_id": "none",
             # Body_Sheet / History 的初始骨架来自可编辑模板文件，
@@ -229,6 +235,64 @@ class CharacterState:
                 normalized[safe_counter_name] = max(0, int(counter_value))
             except (TypeError, ValueError):
                 continue
+
+        return normalized
+
+    def format_timestamp(self, timestamp: Any) -> str:
+        """把时间戳稳定格式化成可直接注入 prompt 的文本。"""
+        try:
+            normalized_timestamp = float(timestamp)
+        except (TypeError, ValueError):
+            return ""
+
+        if normalized_timestamp <= 0:
+            return ""
+
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(normalized_timestamp))
+
+    def normalize_text_list(self, values: Any) -> List[str]:
+        """把轻量上下文列表收敛成非空字符串数组。"""
+        if not isinstance(values, list):
+            return []
+
+        normalized: List[str] = []
+        for item in values:
+            text = str(item).strip() if item is not None else ""
+            if text:
+                normalized.append(text)
+
+        return normalized
+
+    def normalize_last_event(self, last_event: Any) -> Dict[str, Any]:
+        """把最近事件摘要限制在一层简单结构内，并为其补齐 subject_id。"""
+        if not isinstance(last_event, dict):
+            return {}
+
+        normalized: Dict[str, Any] = {}
+        for field_name, field_value in last_event.items():
+            safe_field_name = str(field_name).strip()
+            if not safe_field_name or safe_field_name == "subject_id" or field_value is None:
+                continue
+
+            if isinstance(field_value, list):
+                normalized_list = self.normalize_text_list(field_value)
+                if normalized_list:
+                    normalized[safe_field_name] = normalized_list
+                continue
+
+            if isinstance(field_value, str):
+                safe_text = field_value.strip()
+                if safe_text:
+                    normalized[safe_field_name] = safe_text
+                continue
+
+            if isinstance(field_value, (bool, int, float)):
+                normalized[safe_field_name] = field_value
+
+        if normalized or "subject_id" in last_event:
+            raw_subject_id = last_event.get("subject_id")
+            subject_id = str(raw_subject_id).strip() if raw_subject_id is not None else ""
+            normalized["subject_id"] = subject_id or "global"
 
         return normalized
 
@@ -328,6 +392,11 @@ class CharacterState:
             text = str(value).strip() if value is not None else ""
             return text or fallback
 
+        def _safe_optional_text(value: Any, fallback: str) -> str:
+            if value is None:
+                return fallback
+            return str(value).strip()
+
         def _safe_float(value: Any, fallback: float) -> float:
             try:
                 return float(value)
@@ -336,6 +405,7 @@ class CharacterState:
 
         normalized = {
             "LastUpdateTime": default_state["LastUpdateTime"],
+            "updated_at": self.format_timestamp(default_state["LastUpdateTime"]),
             "emotion": _safe_text(state.get("emotion"), default_state["emotion"]),
             "energy_level": _safe_int(state.get("energy_level"), default_state["energy_level"]),
             "thirst": _safe_int(state.get("thirst"), default_state["thirst"]),
@@ -344,6 +414,14 @@ class CharacterState:
             "physical_state": self.normalize_physical_state(
                 _safe_text(state.get("physical_state"), default_state["physical_state"]),
                 fallback=default_state["physical_state"],
+            ),
+            "location": _safe_optional_text(state.get("location"), default_state["location"]),
+            "post_event_markers": self.normalize_text_list(
+                state.get("post_event_markers", default_state["post_event_markers"])
+            ),
+            "last_event": self.normalize_last_event(state.get("last_event", default_state["last_event"])),
+            "pending_tasks": self.normalize_text_list(
+                state.get("pending_tasks", default_state["pending_tasks"])
             ),
             "update_reason": _safe_text(state.get("update_reason"), default_state["update_reason"]),
             "target_id": _safe_text(state.get("target_id"), default_state["target_id"]),
@@ -365,6 +443,8 @@ class CharacterState:
             normalized["LastUpdateTime"] = float(state.get("LastUpdateTime", default_state["LastUpdateTime"]))
         except (TypeError, ValueError):
             normalized["LastUpdateTime"] = default_state["LastUpdateTime"]
+
+        normalized["updated_at"] = self.format_timestamp(normalized["LastUpdateTime"])
 
         return normalized
 
@@ -455,6 +535,7 @@ class CharacterState:
 
         next_state["emotion"] = self._derive_emotion(next_state)
         next_state["LastUpdateTime"] = min(now, current_state["LastUpdateTime"] + steps * self.update_interval_sec)
+        next_state["updated_at"] = self.format_timestamp(next_state["LastUpdateTime"])
         next_state["update_reason"] = "Natural time-based progression"
 
         if next_state != current_state:
@@ -604,6 +685,10 @@ class LivelyState(Star):
         thirst = state_info.get("thirst", 0)
         physical_state = self.global_state.normalize_physical_state(state_info.get("physical_state", "Idle"))
         emotion = state_info.get("emotion", "Normal")
+        location = str(state_info.get("location", "")).strip()
+        post_event_markers = self.global_state.normalize_text_list(state_info.get("post_event_markers", []))
+        last_event = self.global_state.normalize_last_event(state_info.get("last_event", {}))
+        pending_tasks = self.global_state.normalize_text_list(state_info.get("pending_tasks", []))
         body_sheet = self.global_state.normalize_body_sheet(state_info.get("Body_Sheet", {}))
         history = self.global_state.normalize_history(state_info.get("History", {}))
         state_meta = self.global_state.get_state_meta(physical_state)
@@ -612,6 +697,18 @@ class LivelyState(Star):
             f"- 场景、动作、地点必须符合 {physical_state}（{state_meta['label']}）；若下一句会冲突，先调 apply_state_transition。",
             f"- 情绪保持 {emotion} 的惯性，不要突然反向跳变。",
         ]
+
+        if location:
+            style_rules.append(f"- 当前地点锚点是 {location}；若要切换到别处，先调 apply_state_transition。")
+
+        if post_event_markers:
+            style_rules.append(f"- 保持这些上下文锚点连续：{' / '.join(post_event_markers)}。")
+
+        if last_event:
+            style_rules.append("- 最近事件延续要符合 last_event，不要无故重写刚发生过的事。")
+
+        if pending_tasks:
+            style_rules.append(f"- 若提到后续安排，应与 pending_tasks 一致：{' / '.join(pending_tasks)}。")
 
         if energy_level < 30:
             style_rules.append("- 体力低：语气和动作都应明显疲惫。")
@@ -654,7 +751,8 @@ class LivelyState(Star):
     def _build_global_state_system_prompt(self, uid: str, state_info: Dict[str, Any]) -> str:
         """构建更短的高优先级全局状态约束。"""
         target_id = state_info.get("target_id", "none")
-        time_elapsed = max(0.0, time.time() - state_info.get("LastUpdateTime", time.time()))
+        last_update_time = float(state_info.get("LastUpdateTime", time.time()))
+        time_elapsed = max(0.0, time.time() - last_update_time)
         physical_state = self.global_state.normalize_physical_state(state_info.get("physical_state", "Idle"))
         state_meta = self.global_state.get_state_meta(physical_state)
         state_snapshot = {
@@ -663,8 +761,26 @@ class LivelyState(Star):
             "emotion": state_info.get("emotion", "Normal"),
             "energy": state_info.get("energy_level", 100),
             "thirst": state_info.get("thirst", 0),
+            "updated_at": state_info.get("updated_at", self.global_state.format_timestamp(last_update_time)),
+            "last_update_ts": round(last_update_time, 3),
             "elapsed_sec": round(time_elapsed, 1),
         }
+        location = str(state_info.get("location", "")).strip()
+        if location:
+            state_snapshot["location"] = location
+
+        post_event_markers = self.global_state.normalize_text_list(state_info.get("post_event_markers", []))
+        if post_event_markers:
+            state_snapshot["post_event_markers"] = post_event_markers
+
+        last_event = self.global_state.normalize_last_event(state_info.get("last_event", {}))
+        if last_event:
+            state_snapshot["last_event"] = last_event
+
+        pending_tasks = self.global_state.normalize_text_list(state_info.get("pending_tasks", []))
+        if pending_tasks:
+            state_snapshot["pending_tasks"] = pending_tasks
+
         if target_id != "none":
             state_snapshot["target_id"] = target_id
 
@@ -700,8 +816,12 @@ class LivelyState(Star):
                                 energy_level: Optional[int] = None,
                                 thirst: Optional[int] = None,
                                 physical_state: Optional[str] = None,
+                                location: Optional[str] = None,
                                 update_reason: Optional[str] = None,
                                 target_id: Optional[str] = None,
+                                post_event_markers: Optional[str] = None,
+                                last_event: Optional[str] = None,
+                                pending_tasks: Optional[str] = None,
                                 body_sheet_updates: Optional[str] = None,
                                 history_delta: Optional[str] = None,
                                 ) -> MessageEventResult:
@@ -714,18 +834,21 @@ class LivelyState(Star):
         - 【禁止频繁调用】同一场景内的连续微小动作（如倒水、换个姿势躺着、脱衣服洗澡、关灯等），禁止调用工具；直接在文本回复的动作描写中体现即可。
         - 【判定冲突标准】只有当你准备回复的内容与当前状态存在根本性矛盾（例如当前状态是“在外面跑步”，但你要回复“在床上睡觉”）时，才必须先调用工具。细微姿势或交互改变不算冲突。
         - 距离上次更新已过较长时间，且当前活动按常理应自然结束或转场时调用。
-        - `emotion / energy_level / thirst / physical_state / target_id` 属于快状态，用来更新当前情绪、体力、欲望和身体状态。
+        - `emotion / energy_level / thirst / physical_state / location / target_id / post_event_markers / last_event / pending_tasks` 属于快状态，用来更新当前情绪、体力、地点和上下文锚点。
         - `body_sheet_updates` 属于长期身体档案的局部更新，只在明确设定、持久性身体变化或需要补录长期事实时使用。
         - `history_delta` 属于历史计数的增量更新，只在某个事件已经真实发生后再增加对应计数。
         - 普通动作、临时姿势、瞬时感受不要写进 `body_sheet_updates`；普通口头描述、想象、铺垫也不要改 `history_delta`。
         - `history_delta` 只能更新当前已注册的 History 键名；
         - 如果只需要补录 Body_Sheet 或 History，而不需要切换当前 physical_state，也可以单独调用本工具，并填写 `update_reason` 说明原因。
-        - 由于工具参数类型限制，`body_sheet_updates` 和 `history_delta` 必须传 JSON 字符串，而不是嵌套对象。
+        - 由于工具参数类型限制，`post_event_markers`、`pending_tasks` 需要传 JSON 字符串数组，`last_event`、`body_sheet_updates` 和 `history_delta` 需要传 JSON 字符串对象。
+        - `last_event` 一旦填写，必须带上 `subject_id`；若该事件不强绑定某个 ID，则填写 `global`。
+        - 如果要清空上下文锚点，可以传 `[]` 或 `{}`。
 
         支持部分更新：只传入发生变化的字段即可，未传入字段会沿用旧值。
 
         推荐格式示例：
-        - 更新快状态：`{"physical_state": "Resting", "energy_level": 42, "update_reason": "运动结束后开始休息"}`
+        - 更新快状态：`{"physical_state": "Resting", "location": "sofa", "energy_level": 42, "update_reason": "外出回来后开始休息"}`
+        - 更新上下文锚点：`{"post_event_markers": "[\"刚到家\", \"外套还没收\"]", "last_event": "{\"type\":\"return_home\",\"subject_id\":\"global\",\"note\":\"刚结束外出\"}", "pending_tasks": "[\"稍后整理包\"]", "update_reason": "补录最近事件与待办"}`
         - 更新身体档案：`{"body_sheet_updates": "{\"Breasts\": {\"Status\": \"轻微发胀\"}}", "update_reason": "补录持续性身体变化"}`
         - 更新历史计数：`{"history_delta": "{\"Orgasm_Count\": 1}", "update_reason": "该事件刚刚实际发生"}`
 
@@ -736,9 +859,13 @@ class LivelyState(Star):
             physical_state (str, optional): 物理/行为状态。推荐只使用以下规范值：
                 Idle, Resting, Sleeping, Working, Exercising, Traveling, Socializing。
                 也支持自然语言输入，但插件会先归一化为规范状态再保存。
+            location (str, optional): 当前轻量地点锚点，例如 `bed`、`sofa`、`desk`、`outdoor`。
             update_reason (str, optional): 状态更新原因。
             target_id (str, optional): 当前关注对象 ID。它只表示“此刻主要在和谁互动”，
                 不代表存在另一套独立状态；身体状态和情绪状态始终是全局唯一的。
+            post_event_markers (str, optional): 上下文锚点列表，需传 JSON 字符串数组；例如 `"[\"刚洗完澡\", \"头发未干\"]"`。
+            last_event (str, optional): 最近事件摘要，需传 JSON 字符串对象；对象里应包含 `subject_id`，若无强相关 ID 则填 `global`，例如 `"{\"type\":\"meal\",\"subject_id\":\"global\",\"note\":\"刚吃完晚饭\"}"`。
+            pending_tasks (str, optional): 待办列表，需传 JSON 字符串数组；例如 `"[\"稍后洗碗\"]"`。
             body_sheet_updates (str, optional): 长期身体档案的局部更新，需传 JSON 字符串对象。
                 只在明确设定、持久性变化或需要补录身体事实时使用；普通动作描写不要写进这里。
             history_delta (str, optional): 历史计数的增量更新，需传 JSON 字符串对象。
@@ -752,8 +879,12 @@ class LivelyState(Star):
             "energy_level": energy_level,
             "thirst": thirst,
             "physical_state": physical_state,
+            "location": location,
             "update_reason": update_reason,
             "target_id": target_id,
+            "post_event_markers": post_event_markers,
+            "last_event": last_event,
+            "pending_tasks": pending_tasks,
             "body_sheet_updates": body_sheet_updates,
             "history_delta": history_delta,
         }
@@ -862,6 +993,33 @@ class LivelyState(Star):
 
         return parsed_value, None
 
+    def _parse_tool_json_list_arg(self, raw_value: Any, field_name: str) -> Tuple[Optional[List[Any]], Optional[str]]:
+        """把 llm_tool 里的 JSON 字符串参数解析成数组。"""
+        if raw_value is None:
+            return None, None
+
+        if isinstance(raw_value, list):
+            return raw_value, None
+
+        if not isinstance(raw_value, str):
+            return None, f"{field_name} 必须是 JSON 字符串数组"
+
+        stripped = raw_value.strip()
+        if not stripped:
+            return None, None
+
+        json_text = self._extract_json_block(stripped) or stripped
+
+        try:
+            parsed_value = json_repair.loads(json_text)
+        except Exception as e:
+            return None, f"{field_name} 不是合法的 JSON 数组字符串: {e}"
+
+        if not isinstance(parsed_value, list):
+            return None, f"{field_name} 必须解析为数组"
+
+        return parsed_value, None
+
     def _handle_apply(self, event, payload: dict) -> str:
         if not payload:
             return "请提供大模型返回的 Dict 内容。"
@@ -877,8 +1035,12 @@ class LivelyState(Star):
             "energy_level",
             "thirst",
             "physical_state",
+            "location",
             "update_reason",
             "target_id",
+            "post_event_markers",
+            "last_event",
+            "pending_tasks",
             "body_sheet_updates",
             "history_delta",
         ]
@@ -924,6 +1086,35 @@ class LivelyState(Star):
             text = str(value).strip()
             return text or fallback
 
+        def _safe_optional_text(value: Any, fallback: str) -> str:
+            if value is None:
+                return fallback
+            return str(value).strip()
+
+        raw_post_event_markers = payload.get("post_event_markers")
+        post_event_markers, post_event_markers_parse_error = self._parse_tool_json_list_arg(
+            raw_post_event_markers,
+            "post_event_markers",
+        )
+        if post_event_markers_parse_error:
+            return f"Update Failed：{post_event_markers_parse_error}"
+
+        raw_last_event = payload.get("last_event")
+        last_event_payload, last_event_parse_error = self._parse_tool_json_object_arg(
+            raw_last_event,
+            "last_event",
+        )
+        if last_event_parse_error:
+            return f"Update Failed：{last_event_parse_error}"
+
+        raw_pending_tasks = payload.get("pending_tasks")
+        pending_tasks, pending_tasks_parse_error = self._parse_tool_json_list_arg(
+            raw_pending_tasks,
+            "pending_tasks",
+        )
+        if pending_tasks_parse_error:
+            return f"Update Failed：{pending_tasks_parse_error}"
+
         raw_body_sheet_updates = payload.get("body_sheet_updates")
         body_sheet_updates, body_sheet_parse_error = self._parse_tool_json_object_arg(
             raw_body_sheet_updates,
@@ -957,7 +1148,8 @@ class LivelyState(Star):
             )
 
         has_scalar_update = any(payload.get(field_name) is not None for field_name in [
-            "emotion", "energy_level", "thirst", "physical_state", "update_reason", "target_id"
+            "emotion", "energy_level", "thirst", "physical_state", "location", "update_reason", "target_id",
+            "post_event_markers", "last_event", "pending_tasks"
         ])
         if not has_scalar_update and not normalized_body_sheet_updates and not normalized_history_delta:
             return "Update Failed：至少需要提供一个可更新字段"
@@ -988,7 +1180,27 @@ class LivelyState(Star):
         next_emotion = _safe_text(payload.get("emotion"), current_state.get("emotion", "Normal"))
         next_energy_level = _clamp_int(payload.get("energy_level"), current_energy_level)
         next_thirst = _clamp_int(payload.get("thirst"), current_thirst)
+        current_location = str(current_state.get("location", "")).strip()
+        next_location = _safe_optional_text(payload.get("location"), current_location)
         next_target_id = target_id
+        current_post_event_markers = self.global_state.normalize_text_list(current_state.get("post_event_markers", []))
+        next_post_event_markers = (
+            current_post_event_markers
+            if post_event_markers is None
+            else self.global_state.normalize_text_list(post_event_markers)
+        )
+        current_last_event = self.global_state.normalize_last_event(current_state.get("last_event", {}))
+        next_last_event = (
+            current_last_event
+            if last_event_payload is None
+            else self.global_state.normalize_last_event(last_event_payload)
+        )
+        current_pending_tasks = self.global_state.normalize_text_list(current_state.get("pending_tasks", []))
+        next_pending_tasks = (
+            current_pending_tasks
+            if pending_tasks is None
+            else self.global_state.normalize_text_list(pending_tasks)
+        )
         current_body_sheet = self.global_state.normalize_body_sheet(current_state.get("Body_Sheet", {}))
         merged_body_sheet = self.global_state.merge_body_sheet(current_body_sheet, normalized_body_sheet_updates)
         merged_history = self.global_state.apply_history_delta(current_history, normalized_history_delta)
@@ -998,7 +1210,11 @@ class LivelyState(Star):
             next_energy_level != current_energy_level,
             next_thirst != current_thirst,
             normalized_physical_state != current_state.get("physical_state", "Idle"),
+            next_location != current_location,
             next_target_id != current_state.get("target_id", "none"),
+            next_post_event_markers != current_post_event_markers,
+            next_last_event != current_last_event,
+            next_pending_tasks != current_pending_tasks,
         ])
         has_effective_body_sheet_change = merged_body_sheet != current_body_sheet
         has_effective_history_change = merged_history != current_history
@@ -1023,14 +1239,20 @@ class LivelyState(Star):
                     f"还需等待 {self.body_sheet_cooldown_sec - elapsed_body_sheet_update:.1f} 秒"
                 )
         
+        last_update_time = now if has_effective_fast_state_change else current_state.get("LastUpdateTime", now)
         new_state_data = {
             # 慢变化字段不应该顺手把身体状态的时间轴重置掉；
             # 只有快状态真的发生变化时才刷新 LastUpdateTime。
-            "LastUpdateTime": now if has_effective_fast_state_change else current_state.get("LastUpdateTime", now),
+            "LastUpdateTime": last_update_time,
+            "updated_at": self.global_state.format_timestamp(last_update_time),
             "emotion": next_emotion,
             "energy_level": next_energy_level,
             "thirst": next_thirst,
             "physical_state": normalized_physical_state,
+            "location": next_location,
+            "post_event_markers": next_post_event_markers,
+            "last_event": next_last_event,
+            "pending_tasks": next_pending_tasks,
             "update_reason": reason,
             "target_id": next_target_id,
             "Body_Sheet": merged_body_sheet,
