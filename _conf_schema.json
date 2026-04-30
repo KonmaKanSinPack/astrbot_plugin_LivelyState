@@ -8,5 +8,15 @@
         "description": "每攒够多少条新消息就触发一次总结",
         "type": "int",
         "default": 20
+    },
+    "auto_update_interval_sec":{
+        "description": "状态自然流转的最小时间步长（秒）。到达后会自动按当前行为恢复/消耗体力并增长 thirst",
+        "type": "int",
+        "default": 300
+    },
+    "active_state_timeout_sec":{
+        "description": "进行中状态的自然超时时间（秒）。超过后会自动回落到 Idle，避免状态长期卡死",
+        "type": "int",
+        "default": 1800
     }
 }
