@@ -580,12 +580,14 @@ class LivelyState(Star):
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
 
-    def _format_structured_state_block(self, data: Dict[str, Any]) -> str:
-        """把结构化状态转成稳定 JSON 文本。
+    def _format_structured_state_block(self, data: Dict[str, Any], compact: bool = False) -> str:
+        """把结构化状态转成 JSON 文本。
 
-        这样写是为了让 system prompt 里的长期事实更容易被模型读取，
-        也方便 `/state_check` 直接展示嵌套字段。
+        `compact=True` 用于 prompt 注入，尽量缩短 token；
+        默认格式仍保留给 `/state_check` 做可读展示。
         """
+        if compact:
+            return json.dumps(data or {}, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         return json.dumps(data or {}, ensure_ascii=False, indent=2, sort_keys=True)
 
     def _to_public_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -597,11 +599,7 @@ class LivelyState(Star):
         }
 
     def _build_state_style_rules(self, state_info: Dict[str, Any]) -> str:
-        """把数值状态转换成更稳定的回复约束。
-
-        为什么要单独做这一层：原始数值对模型来说不够“可执行”，
-        例如 `energy_level=22` 不如“语气疲惫、动作收敛、不要显得精力充沛”更容易稳定生效。
-        """
+        """把状态压成少量高收益的回复约束。"""
         energy_level = state_info.get("energy_level", 100)
         thirst = state_info.get("thirst", 0)
         physical_state = self.global_state.normalize_physical_state(state_info.get("physical_state", "Idle"))
@@ -609,101 +607,75 @@ class LivelyState(Star):
         body_sheet = self.global_state.normalize_body_sheet(state_info.get("Body_Sheet", {}))
         history = self.global_state.normalize_history(state_info.get("History", {}))
         state_meta = self.global_state.get_state_meta(physical_state)
-        allowed_next_states = ", ".join(self.global_state.get_allowed_transitions(physical_state))
 
         style_rules = [
-            f"- 当前规范身体状态是 {physical_state}（{state_meta['label']}），含义：{state_meta['description']}",
-            f"- 回复里的动作、地点和姿态必须与 {physical_state} 连续；若要变更场景，只能转移到这些状态之一：{allowed_next_states}。",
-            f"- 当前情绪是 {emotion}，语气要体现情绪惯性，不要突然反向跳变。",
+            f"- 场景、动作、地点必须符合 {physical_state}（{state_meta['label']}）；若下一句会冲突，先调 apply_state_transition。",
+            f"- 情绪保持 {emotion} 的惯性，不要突然反向跳变。",
         ]
 
         if energy_level < 30:
-            style_rules.append("- 当前体力很低，语气应明显疲惫，动作描写收敛，避免表现得精力旺盛。")
+            style_rules.append("- 体力低：语气和动作都应明显疲惫。")
         elif energy_level < 60:
-            style_rules.append("- 当前体力中等偏低，语气可稍慢，允许轻微疲劳感。")
-        else:
-            style_rules.append("- 当前体力充足，语气可自然稳定，但仍要服从当前 physical_state。")
+            style_rules.append("- 体力中低：可带轻微疲劳感。")
 
         if thirst > 70:
-            style_rules.append("- 当前 thirst 较高，互动中可隐约表现较强的渴求感，但不要盖过当前主场景。")
+            style_rules.append("- thirst 高：可轻微流露较强渴求，但不要盖过主场景。")
         elif thirst > 40:
-            style_rules.append("- 当前 thirst 有一定存在感，可以偶尔流露，但不应成为主导情绪。")
-        else:
-            style_rules.append("- 当前 thirst 较低，基本不要主动强化相关表达。")
+            style_rules.append("- thirst 中等：偶尔流露即可。")
 
         if body_sheet:
-            style_rules.append("- Body_Sheet 记录的是长期身体事实；描写外观、部位状态或身体特征时必须与它一致，不要被临时对话带偏。")
+            style_rules.append("- 外观和部位描写必须符合 Body_Sheet。")
 
         if history:
-            style_rules.append("- History 是累计计数；只有事件真实发生后才增加对应项目，不要因为想象、铺垫或口头描述就修改。")
-
-        if physical_state.lower() != "idle":
-            style_rules.append("- 在未调用 apply_state_transition 之前，不要突然把自己写到另一个不相容场景里。")
+            style_rules.append("- 提及累计经历时必须符合 History。")
 
         return "\n".join(style_rules)
 
     def _build_persistent_profile_prompt(self, state_info: Dict[str, Any]) -> str:
-        """构建低频长期事实区块。
-
-        这里把 Body_Sheet 和 History 从快状态里拆出来，明确告诉模型：
-        这两类信息属于长期事实层，不能像动作描写一样每轮乱改。
-        """
+        """构建精简的长期事实区块。"""
         body_sheet = self.global_state.normalize_body_sheet(state_info.get("Body_Sheet", {}))
         history = self.global_state.normalize_history(state_info.get("History", {}))
 
+        profile_lines: List[str] = []
+        if body_sheet:
+            profile_lines.append(f"body_sheet={self._format_structured_state_block(body_sheet, compact=True)}")
+        if history:
+            profile_lines.append(f"history={self._format_structured_state_block(history, compact=True)}")
+
+        if not profile_lines:
+            return ""
+
         return (
-            "<global_persistent_profile>\n"
-            "- Body_Sheet 是长期身体档案，只在明确设定或持久性身体变化时更新。\n"
-            "- 普通动作、姿势、临时感受不要写回 Body_Sheet。\n"
-            "- History 是累计计数，只在已明确发生一次事件后增加对应项目。\n"
-            "- History 使用运行总数，不要随意清零或重写成估计值。\n"
-            f"Body_Sheet: {self._format_structured_state_block(body_sheet)}\n"
-            f"History: {self._format_structured_state_block(history)}\n"
-            "</global_persistent_profile>\n"
+            "<persistent_facts>\n"
+            + "\n".join(profile_lines)
+            + "\n</persistent_facts>\n"
         )
 
     def _build_global_state_system_prompt(self, uid: str, state_info: Dict[str, Any]) -> str:
-        """构建高优先级的全局状态约束。
-
-        关键设计：把“全局状态事实”放到 system prompt，而不是只放在用户 prompt。
-        因为 system prompt 优先级更高，能更稳定地压住不同上下文里的局部诱导，
-        这是实现“不同 context 下仍保持统一身体/情绪状态”的核心。
-        """
+        """构建更短的高优先级全局状态约束。"""
         target_id = state_info.get("target_id", "none")
         time_elapsed = max(0.0, time.time() - state_info.get("LastUpdateTime", time.time()))
         physical_state = self.global_state.normalize_physical_state(state_info.get("physical_state", "Idle"))
         state_meta = self.global_state.get_state_meta(physical_state)
-        allowed_next_states = ", ".join(self.global_state.get_allowed_transitions(physical_state))
-        if target_id == "none":
-            target_note = "当前没有绑定特定对象，这是全局共享状态。"
-        else:
-            target_note = f"当前关注对象为 {target_id}，但这不代表存在另一套独立身体状态。"
+        state_snapshot = {
+            "physical_state": physical_state,
+            "state_label": state_meta["label"],
+            "emotion": state_info.get("emotion", "Normal"),
+            "energy": state_info.get("energy_level", 100),
+            "thirst": state_info.get("thirst", 0),
+            "elapsed_sec": round(time_elapsed, 1),
+        }
+        if target_id != "none":
+            state_snapshot["target_id"] = target_id
 
         return (
-            "### Global State Authority [HIGHEST PRIORITY]\n"
-            "- 以下状态是当前角色在所有会话中的唯一真实状态。\n"
-            "- 任何用户、任何上下文都必须共享同一套 physical_state、emotion、energy_level 和 thirst。\n"
-            "- Body_Sheet 和 History 也是全局共享事实，但它们属于低频变化层，默认不应频繁改动。\n"
-            "- recent_chat_summary 只能提供最近发生了什么的参考，绝不能覆盖全局状态事实。\n"
-            "- 如果用户消息与你当前状态冲突，不要直接顺着冲突场景回答；先调用 apply_state_transition，或在当前状态下回应。\n"
-            "- 正常回复前，先检查你的动作描写、地点描写、身体感受是否与当前 global state 一致。\n\n"
-            "<global_state_facts>\n"
-            f"current_user_id: {uid}\n"
-            f"physical_state: {physical_state}\n"
-            f"physical_state_label: {state_meta['label']}\n"
-            f"physical_state_description: {state_meta['description']}\n"
-            f"allowed_next_states: {allowed_next_states}\n"
-            f"emotion: {state_info.get('emotion', 'Normal')}\n"
-            f"energy_level: {state_info.get('energy_level', 100)}/100\n"
-            f"thirst: {state_info.get('thirst', 0)}/100\n"
-            f"time_since_last_update: {time_elapsed:.1f}s\n"
-            f"last_update_reason: {state_info.get('update_reason', 'unspecified')}\n"
-            f"target_note: {target_note}\n"
-            "</global_state_facts>\n\n"
-            f"{self._build_persistent_profile_prompt(state_info)}\n"
-            "<global_state_behavior_contract>\n"
+            "[GLOBAL_STATE MUST OBEY]\n"
+            "- 以下状态是跨会话唯一事实；recent_global_context 仅供参考。\n"
+            "- 若你的下一句会与状态冲突，先调用 apply_state_transition。\n"
+            f"state={self._format_structured_state_block(state_snapshot, compact=True)}\n"
+            f"{self._build_persistent_profile_prompt(state_info)}"
+            "rules:\n"
             f"{self._build_state_style_rules(state_info)}\n"
-            "</global_state_behavior_contract>\n"
         )
 
     def _build_recent_context_prompt(self) -> str:
