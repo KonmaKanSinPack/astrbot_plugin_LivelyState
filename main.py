@@ -551,7 +551,7 @@ class GlobalObserver:
     def view_recent_messages(self):
         logger.info(f"Recent messages: {list(self.recent_messages)}")
 
-@register("LivelyState", "兔子", "这是一个让角色拥有持续状态记忆的拟人插件：不再每句“重开存档”，而是带着上一刻的心情继续和你说话。", "v1.1.0")
+@register("LivelyState", "兔子", "这是一个维护全局身体状态、情绪惯性与长期身体档案的状态记忆插件，让角色在不同对话上下文中依然保持统一反应与连续状态。", "v1.2.0")
 class LivelyState(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
