@@ -721,7 +721,7 @@ class LivelyState(Star):
             style_rules.append("- thirst 中等：偶尔流露即可。")
 
         if body_sheet:
-            style_rules.append("- 外观和部位描写必须符合 Body_Sheet；若需要补录当前身体事实，调用 update_body_sheet。")
+            style_rules.append("- 外观和部位描写必须符合 Body_Sheet；若需要补录长期身体事实，调用 update_body_sheet。")
 
         if history:
             style_rules.append("- 提及累计经历时必须符合 History。")
@@ -822,7 +822,6 @@ class LivelyState(Star):
                                 post_event_markers: Optional[str] = None,
                                 last_event: Optional[str] = None,
                                 pending_tasks: Optional[str] = None,
-                                body_sheet_updates: Optional[str] = None,
                                 history_delta: Optional[str] = None,
                                 ) -> MessageEventResult:
 
@@ -835,12 +834,11 @@ class LivelyState(Star):
         - 【判定冲突标准】只有当你准备回复的内容与当前状态存在根本性矛盾（例如当前状态是“在外面跑步”，但你要回复“在床上睡觉”）时，才必须先调用工具。细微姿势或交互改变不算冲突。
         - 距离上次更新已过较长时间，且当前活动按常理应自然结束或转场时调用。
         - `emotion / energy_level / thirst / physical_state / location / target_id / post_event_markers / last_event / pending_tasks` 属于快状态，用来更新当前情绪、体力、地点和上下文锚点。
-        - `body_sheet_updates` 属于长期身体档案的局部更新，只在明确设定、持久性身体变化或需要补录长期事实时使用。
         - `history_delta` 属于历史计数的增量更新，只在某个事件已经真实发生后再增加对应计数。
-        - 普通动作、临时姿势、瞬时感受不要写进 `body_sheet_updates`；普通口头描述、想象、铺垫也不要改 `history_delta`。
+        - 普通口头描述、想象、铺垫不要改 `history_delta`。
         - `history_delta` 只能更新当前已注册的 History 键名；
-        - 如果只需要补录 Body_Sheet，优先调用 `update_body_sheet`；如果只需要补录 History，也可以单独调用本工具，并填写 `update_reason` 说明原因。
-        - 由于工具参数类型限制，`post_event_markers`、`pending_tasks` 需要传 JSON 字符串数组，`last_event`、`body_sheet_updates` 和 `history_delta` 需要传 JSON 字符串对象。
+        - Body_Sheet 只能通过 `update_body_sheet` 更新；如果只需要补录 History，也可以单独调用本工具，并填写 `update_reason` 说明原因。
+        - 由于工具参数类型限制，`post_event_markers`、`pending_tasks` 需要传 JSON 字符串数组，`last_event` 和 `history_delta` 需要传 JSON 字符串对象。
         - `last_event` 一旦填写，必须带上 `subject_id`；若该事件不强绑定某个 ID，则填写 `global`。
         - 如果要清空上下文锚点，可以传 `[]` 或 `{}`。
 
@@ -849,7 +847,6 @@ class LivelyState(Star):
         推荐格式示例：
         - 更新快状态：`{"physical_state": "Resting", "location": "sofa", "energy_level": 42, "update_reason": "外出回来后开始休息"}`
         - 更新上下文锚点：`{"post_event_markers": "[\"刚到家\", \"外套还没收\"]", "last_event": "{\"type\":\"return_home\",\"subject_id\":\"global\",\"note\":\"刚结束外出\"}", "pending_tasks": "[\"稍后整理包\"]", "update_reason": "补录最近事件与待办"}`
-        - 更新身体档案：`{"body_sheet_updates": "{\"Breasts\": {\"Status\": \"轻微发胀\"}}", "update_reason": "补录持续性身体变化"}`
         - 更新历史计数：`{"history_delta": "{\"Orgasm_Count\": 1}", "update_reason": "该事件刚刚实际发生"}`
 
         Args:
@@ -866,8 +863,6 @@ class LivelyState(Star):
             post_event_markers (str, optional): 上下文锚点列表，需传 JSON 字符串数组；例如 `"[\"刚洗完澡\", \"头发未干\"]"`。
             last_event (str, optional): 最近事件摘要，需传 JSON 字符串对象；对象里应包含 `subject_id`，若无强相关 ID 则填 `global`，例如 `"{\"type\":\"meal\",\"subject_id\":\"global\",\"note\":\"刚吃完晚饭\"}"`。
             pending_tasks (str, optional): 待办列表，需传 JSON 字符串数组；例如 `"[\"稍后洗碗\"]"`。
-            body_sheet_updates (str, optional): 长期身体档案的局部更新，需传 JSON 字符串对象。
-                只在明确设定、持久性变化或需要补录身体事实时使用；普通动作描写不要写进这里。
             history_delta (str, optional): 历史计数的增量更新，需传 JSON 字符串对象。
                 这里传入的是“本次增加多少”，不是最新总数，例如 `{"1_Count": 1}` 表示该计数加 1。
         '''
@@ -885,7 +880,6 @@ class LivelyState(Star):
             "post_event_markers": post_event_markers,
             "last_event": last_event,
             "pending_tasks": pending_tasks,
-            "body_sheet_updates": body_sheet_updates,
             "history_delta": history_delta,
         }
         report = self._handle_apply(event, cur_state)

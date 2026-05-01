@@ -201,14 +201,13 @@ pip install -r requirements.txt
 
 普通的小动作会在文本中直接表现，不会频繁刷新状态。
 
-现在 `apply_state_transition` 还支持两类低频更新：
+现在 `apply_state_transition` 主要负责快状态和上下文锚点更新：
 
 -   `location`：给当前状态补一个轻量地点锚点，避免只有 `Resting` 却不知道是在床上、沙发上还是书桌前。
 -   `post_event_markers` / `last_event` / `pending_tasks`：为状态快照补充“刚发生过什么、目前还挂着什么后续动作”的上下文锚点；由于工具参数限制，`post_event_markers` 和 `pending_tasks` 需要 JSON 字符串数组，`last_event` 需要 JSON 字符串对象，且对象内应包含 `subject_id`，若无强相关 ID 则填 `global`。
--   `body_sheet_updates`：对 `Body_Sheet` 做局部合并更新，只补改指定部位和属性，不覆盖整份档案。这个字段仍可通过 `apply_state_transition` 使用，但现在更推荐直接调用 `update_body_sheet`。
 -   `history_delta`：对 `History` 做增量累加。由于工具参数限制，这里需要传 JSON 字符串，例如 `"{\"1_Count\": 1}"` 表示把该计数加一。
 
-这两类字段都不适合高频调用。普通动作、临时姿势、当前回合的一次口头描写，应该只体现在回复文本中，不应写回长期档案。
+`Body_Sheet` 现在只通过 `update_body_sheet` 更新。普通动作、临时姿势、当前回合的一次口头描写，应该只体现在回复文本中，不应写回长期档案。
 
 ### 3.1) 硬冷却与高频更新保护
 
