@@ -38,7 +38,7 @@ class CharacterState:
             "energy_delta": 3,
             "thirst_delta": 1,
             "auto_fallback": "Idle",
-            "allowed_next_states": ["Idle", "Resting", "Sleeping", "Socializing"],
+            "allowed_next_states": ["Idle", "Resting", "Sleeping", "Socializing", "Traveling"],
         },
         "Sleeping": {
             "label": "睡眠中",
