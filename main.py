@@ -721,7 +721,7 @@ class LivelyState(Star):
             style_rules.append("- thirst 中等：偶尔流露即可。")
 
         if body_sheet:
-            style_rules.append("- 外观和部位描写必须符合 Body_Sheet。")
+            style_rules.append("- 外观和部位描写必须符合 Body_Sheet；若需要补录当前身体事实，调用 update_body_sheet。")
 
         if history:
             style_rules.append("- 提及累计经历时必须符合 History。")
@@ -787,7 +787,7 @@ class LivelyState(Star):
         return (
             "[GLOBAL_STATE MUST OBEY]\n"
             "- 以下状态是跨会话唯一事实；recent_global_context 仅供参考。\n"
-            "- 若你的下一句会与状态冲突，先调用 apply_state_transition。\n"
+            "- 若你的下一句会与当前快状态冲突，先调用 apply_state_transition；若要补录长期身体事实，调用 update_body_sheet。\n"
             f"state={self._format_structured_state_block(state_snapshot, compact=True)}\n"
             f"{self._build_persistent_profile_prompt(state_info)}"
             "rules:\n"
@@ -839,7 +839,7 @@ class LivelyState(Star):
         - `history_delta` 属于历史计数的增量更新，只在某个事件已经真实发生后再增加对应计数。
         - 普通动作、临时姿势、瞬时感受不要写进 `body_sheet_updates`；普通口头描述、想象、铺垫也不要改 `history_delta`。
         - `history_delta` 只能更新当前已注册的 History 键名；
-        - 如果只需要补录 Body_Sheet 或 History，而不需要切换当前 physical_state，也可以单独调用本工具，并填写 `update_reason` 说明原因。
+        - 如果只需要补录 Body_Sheet，优先调用 `update_body_sheet`；如果只需要补录 History，也可以单独调用本工具，并填写 `update_reason` 说明原因。
         - 由于工具参数类型限制，`post_event_markers`、`pending_tasks` 需要传 JSON 字符串数组，`last_event`、`body_sheet_updates` 和 `history_delta` 需要传 JSON 字符串对象。
         - `last_event` 一旦填写，必须带上 `subject_id`；若该事件不强绑定某个 ID，则填写 `global`。
         - 如果要清空上下文锚点，可以传 `[]` 或 `{}`。
@@ -896,6 +896,42 @@ class LivelyState(Star):
         else:
             # await event.send(event.plain_result("Update successful: " + report))
             return report
+
+    @filter.llm_tool(name="update_body_sheet")
+    async def update_body_sheet(
+        self,
+        event: AstrMessageEvent,
+        body_sheet_updates: str,
+        update_reason: Optional[str] = None,
+    ) -> MessageEventResult:
+
+        '''更新长期身体档案 Body_Sheet（持久化）。
+
+        使用建议（给 LLM 的决策规则）：
+        - 只在明确设定、持久性身体变化或需要补录长期身体事实时调用。
+        - 普通动作、临时姿势、瞬时感受不要写入 Body_Sheet；这些应只体现在当前回复文本里。
+        - 该工具不会修改 `physical_state / emotion / energy_level / thirst` 等快状态；如果场景本身发生切换，应改用 `apply_state_transition`。
+        - `body_sheet_updates` 必须传 JSON 字符串对象，结构为 `{部位: {属性: 描述}}`。
+        - 更新是局部合并，不会覆盖整份 Body_Sheet；只会改动你传入的部位和属性。
+        - 本工具同样受 Body_Sheet 硬冷却限制；冷却中会拒绝更新。
+
+        推荐格式示例：
+        - `{"body_sheet_updates": "{\"Breasts\": {\"Status\": \"轻微发胀\"}}", "update_reason": "补录持续性身体变化"}`
+        - `{"body_sheet_updates": "{\"Hair\": {\"Status\": \"仍有些潮湿\"}, \"Skin\": {\"Temperature\": \"微热\"}}", "update_reason": "补录洗澡后的持续状态"}`
+
+        Args:
+            body_sheet_updates (str): 长期身体档案的局部更新，需传 JSON 字符串对象。
+            update_reason (str, optional): 更新原因。建议简要说明为什么这属于长期或持续性事实。
+        '''
+
+        payload = {
+            "LastUpdateTime": time.time(),
+            "body_sheet_updates": body_sheet_updates,
+            "update_reason": update_reason,
+        }
+        report = self._handle_apply(event, payload)
+        logger.info("Body sheet update report: %s", report)
+        return report
 
 
     @filter.command("state_check")
