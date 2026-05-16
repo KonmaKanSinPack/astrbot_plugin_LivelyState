@@ -74,6 +74,7 @@
 -   `energy_level`：体力值（0-100 整数，<30 时角色会表现出疲惫）
 -   `thirst`：欲望/渴求值（0-100 整数，影响角色互动的迫切感）
 -   `physical_state`：当前物理/行为状态（如 Idle, Sleeping, Running）
+-   `context_subject_id`：`location / post_event_markers / pending_tasks` 这组上下文锚点属于哪个 subject；无强相关对象时为 `global`
 -   `location`：轻量地点锚点（如 `bed`、`sofa`、`desk`、`outdoor`）
 -   `post_event_markers`：最近事件后的上下文锚点数组，用来保留“刚洗完澡 / 刚到家 / 还没收拾桌面”这类状态尾迹
 -   `last_event`：最近一次重要事件的结构化摘要对象，适合记录事件类型、参与对象、备注等；一旦填写，内部应带 `subject_id`，若无强相关 ID 则填 `global`
@@ -93,6 +94,7 @@
   "energy_level": 100,
   "thirst": 0,
   "physical_state": "Idle",
+  "context_subject_id": "global",
   "location": "",
   "post_event_markers": [],
   "last_event": {},
@@ -203,11 +205,12 @@ pip install -r requirements.txt
 
 现在 `apply_state_transition` 主要负责快状态和上下文锚点更新：
 
+-   `context_subject_id`：声明 `location / post_event_markers / pending_tasks` 这一组上下文锚点属于谁；若和某个 id 强相关就填那个 id，否则填 `global`。
 -   `location`：给当前状态补一个轻量地点锚点，避免只有 `Resting` 却不知道是在床上、沙发上还是书桌前。
 -   `post_event_markers` / `last_event` / `pending_tasks`：为状态快照补充“刚发生过什么、目前还挂着什么后续动作”的上下文锚点；由于工具参数限制，`post_event_markers` 和 `pending_tasks` 需要 JSON 字符串数组，`last_event` 需要 JSON 字符串对象，且对象内应包含 `subject_id`，若无强相关 ID 则填 `global`。
 -   `history_delta`：对 `History` 做增量累加。由于工具参数限制，这里需要传 JSON 字符串，例如 `"{\"1_Count\": 1}"` 表示把该计数加一。
 
-`Body_Sheet` 现在只通过 `update_body_sheet` 更新。普通动作、临时姿势、当前回合的一次口头描写，应该只体现在回复文本中，不应写回长期档案。
+`Body_Sheet` 现在只通过 `update_body_sheet` 更新。普通动作、临时姿势、当前回合的一次口头描写，应该只体现在回复文本中，不应写回长期档案。插件在注入 prompt 时会按 `context_subject_id`、`last_event.subject_id` 和当前会话对象过滤上下文锚点，避免把别人的状态尾迹误投到当前用户身上。
 
 ### 3.1) 硬冷却与高频更新保护
 

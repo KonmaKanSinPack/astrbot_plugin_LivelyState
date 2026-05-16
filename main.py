@@ -174,6 +174,7 @@ class CharacterState:
             "energy_level": 100,
             "thirst": 0,
             "physical_state": "Idle",
+            "context_subject_id": "global",
             "location": "",
             "post_event_markers": [],
             "last_event": {},
@@ -263,6 +264,28 @@ class CharacterState:
 
         return normalized
 
+    def normalize_subject_id(
+        self,
+        value: Any,
+        fallback: str = "global",
+        allow_none_literal: bool = False,
+    ) -> str:
+        """统一收敛 subject_id / target_id / context_subject_id 的保留字和空值。"""
+        if value is None:
+            return fallback
+
+        text = str(value).strip()
+        if not text:
+            return fallback
+
+        lowered = text.lower()
+        if lowered == "global":
+            return "global"
+        if allow_none_literal and lowered == "none":
+            return "none"
+
+        return text
+
     def normalize_last_event(self, last_event: Any) -> Dict[str, Any]:
         """把最近事件摘要限制在一层简单结构内，并为其补齐 subject_id。"""
         if not isinstance(last_event, dict):
@@ -290,9 +313,7 @@ class CharacterState:
                 normalized[safe_field_name] = field_value
 
         if normalized or "subject_id" in last_event:
-            raw_subject_id = last_event.get("subject_id")
-            subject_id = str(raw_subject_id).strip() if raw_subject_id is not None else ""
-            normalized["subject_id"] = subject_id or "global"
+            normalized["subject_id"] = self.normalize_subject_id(last_event.get("subject_id"), fallback="global")
 
         return normalized
 
@@ -415,6 +436,10 @@ class CharacterState:
                 _safe_text(state.get("physical_state"), default_state["physical_state"]),
                 fallback=default_state["physical_state"],
             ),
+            "context_subject_id": self.normalize_subject_id(
+                state.get("context_subject_id"),
+                fallback=default_state["context_subject_id"],
+            ),
             "location": _safe_optional_text(state.get("location"), default_state["location"]),
             "post_event_markers": self.normalize_text_list(
                 state.get("post_event_markers", default_state["post_event_markers"])
@@ -424,7 +449,11 @@ class CharacterState:
                 state.get("pending_tasks", default_state["pending_tasks"])
             ),
             "update_reason": _safe_text(state.get("update_reason"), default_state["update_reason"]),
-            "target_id": _safe_text(state.get("target_id"), default_state["target_id"]),
+            "target_id": self.normalize_subject_id(
+                state.get("target_id"),
+                fallback=default_state["target_id"],
+                allow_none_literal=True,
+            ),
             # 这里会把模板里新增但当前 state 里还没有的字段自动补进来；
             # 已有值则保留，避免用户修改模板后把运行中的记录整体覆盖掉。
             "Body_Sheet": self.merge_body_sheet(
@@ -620,7 +649,7 @@ class GlobalObserver:
                         f"【绝对规则】（违反将导致系统崩溃）：\n"
                         f"1. 视角限制：只能描述“系统/AI助手”刚刚经历了什么，不要复述用户说了什么。\n"
                         f"2. 格式要求：输出必须是一句简短的、以第一人称或客观状态描述的中文句子，最多不超过 50 个字。严禁输出“摘要如下”、“我现在的状态是”等任何废话。\n"
-                        f"3. 再不泄露用户敏感信息的情况下，你需要尽可能提炼出自己与具体的用户做了什么，让你能知道自己刚刚与哪些用户聊了什么，比如xxx在和我聊天气情况。\n"
+                        f"3. 不要输出可识别的具体用户标识；如果必须提到互动对象，只能用“某位用户/另一位用户”等模糊称呼，并明确这只是后台参考，不代表当前会话对象。\n"
                         f"以下是你最近与多位用户的聊天记录。assistant表示AI助手的回复，user表示用户的提问：\n"
                     )
         provider = context.get_using_provider()
@@ -750,11 +779,26 @@ class LivelyState(Star):
 
     def _build_global_state_system_prompt(self, uid: str, state_info: Dict[str, Any]) -> str:
         """构建更短的高优先级全局状态约束。"""
-        target_id = state_info.get("target_id", "none")
+        current_session_subject_id = str(uid).strip() or "global"
+        target_id = self.global_state.normalize_subject_id(
+            state_info.get("target_id", "none"),
+            fallback="none",
+            allow_none_literal=True,
+        )
         last_update_time = float(state_info.get("LastUpdateTime", time.time()))
         time_elapsed = max(0.0, time.time() - last_update_time)
         physical_state = self.global_state.normalize_physical_state(state_info.get("physical_state", "Idle"))
         state_meta = self.global_state.get_state_meta(physical_state)
+        context_subject_id = self.global_state.normalize_subject_id(
+            state_info.get("context_subject_id", "global"),
+            fallback="global",
+        )
+        last_event = self.global_state.normalize_last_event(state_info.get("last_event", {}))
+        last_event_subject_id = self.global_state.normalize_subject_id(
+            last_event.get("subject_id"),
+            fallback="global",
+        ) if last_event else "global"
+        context_fields_visible = context_subject_id in {"global", current_session_subject_id}
         state_snapshot = {
             "physical_state": physical_state,
             "state_label": state_meta["label"],
@@ -764,25 +808,55 @@ class LivelyState(Star):
             "updated_at": state_info.get("updated_at", self.global_state.format_timestamp(last_update_time)),
             "last_update_ts": round(last_update_time, 3),
             "elapsed_sec": round(time_elapsed, 1),
+            "current_session_subject_id": current_session_subject_id,
         }
         location = str(state_info.get("location", "")).strip()
-        if location:
+        if context_fields_visible and location:
             state_snapshot["location"] = location
 
         post_event_markers = self.global_state.normalize_text_list(state_info.get("post_event_markers", []))
-        if post_event_markers:
+        if context_fields_visible and post_event_markers:
             state_snapshot["post_event_markers"] = post_event_markers
 
-        last_event = self.global_state.normalize_last_event(state_info.get("last_event", {}))
-        if last_event:
+        if context_fields_visible and context_subject_id != "global":
+            state_snapshot["context_subject_id"] = context_subject_id
+
+        if last_event and last_event_subject_id in {"global", current_session_subject_id}:
             state_snapshot["last_event"] = last_event
 
         pending_tasks = self.global_state.normalize_text_list(state_info.get("pending_tasks", []))
-        if pending_tasks:
+        if context_fields_visible and pending_tasks:
             state_snapshot["pending_tasks"] = pending_tasks
 
-        if target_id != "none":
+        if target_id == current_session_subject_id:
             state_snapshot["target_id"] = target_id
+
+        filtered_state_info = dict(state_info)
+        if not context_fields_visible:
+            filtered_state_info["location"] = ""
+            filtered_state_info["post_event_markers"] = []
+            filtered_state_info["pending_tasks"] = []
+        if last_event and last_event_subject_id not in {"global", current_session_subject_id}:
+            filtered_state_info["last_event"] = {}
+        if target_id not in {"none", current_session_subject_id}:
+            filtered_state_info["target_id"] = "none"
+
+        scope_rules: List[str] = []
+        if not context_fields_visible and any([location, post_event_markers, pending_tasks]):
+            scope_rules.append(
+                f"- location、post_event_markers、pending_tasks 当前绑定到 subject_id={context_subject_id}，"
+                f"不是当前会话对象 {current_session_subject_id}；不要把这些现场细节投射到当前用户。"
+            )
+        if last_event and last_event_subject_id not in {"global", current_session_subject_id}:
+            scope_rules.append(
+                f"- last_event 绑定到 subject_id={last_event_subject_id}，只能当背景事实，不能写成当前用户刚参与的事件。"
+            )
+        if target_id not in {"none", current_session_subject_id}:
+            scope_rules.append(
+                f"- target_id={target_id} 表示当前关注对象不是当前会话对象 {current_session_subject_id}；不要把该对象误写成当前用户。"
+            )
+
+        rules_text = "\n".join(scope_rules + [self._build_state_style_rules(filtered_state_info)])
 
         return (
             "[GLOBAL_STATE MUST OBEY]\n"
@@ -791,10 +865,10 @@ class LivelyState(Star):
             f"state={self._format_structured_state_block(state_snapshot, compact=True)}\n"
             f"{self._build_persistent_profile_prompt(state_info)}"
             "rules:\n"
-            f"{self._build_state_style_rules(state_info)}\n"
+            f"{rules_text}\n"
         )
 
-    def _build_recent_context_prompt(self) -> str:
+    def _build_recent_context_prompt(self, current_uid: str) -> str:
         """构建低优先级的最近对话观察摘要。
 
         这里刻意只把它作为 reference block，避免“刚刚聊了什么”反过来改写身体状态，
@@ -806,6 +880,8 @@ class LivelyState(Star):
         return (
             "<recent_global_context>\n"
             "This block is reference-only. If it conflicts with GLOBAL STATE AUTHORITY, obey GLOBAL STATE AUTHORITY.\n"
+            "Never treat users mentioned here as the current conversation user unless GLOBAL STATE says subject_id or target_id matches current_session_subject_id.\n"
+            f"current_session_subject_id={current_uid}\n"
             f"{self.global_observer.current_state}\n"
             "</recent_global_context>"
         )
@@ -816,6 +892,7 @@ class LivelyState(Star):
                                 energy_level: Optional[int] = None,
                                 thirst: Optional[int] = None,
                                 physical_state: Optional[str] = None,
+                                context_subject_id: Optional[str] = None,
                                 location: Optional[str] = None,
                                 update_reason: Optional[str] = None,
                                 target_id: Optional[str] = None,
@@ -833,20 +910,22 @@ class LivelyState(Star):
         - 【禁止频繁调用】同一场景内的连续微小动作（如倒水、换个姿势躺着、脱衣服洗澡、关灯等），禁止调用工具；直接在文本回复的动作描写中体现即可。
         - 【判定冲突标准】只有当你准备回复的内容与当前状态存在根本性矛盾（例如当前状态是“在外面跑步”，但你要回复“在床上睡觉”）时，才必须先调用工具。细微姿势或交互改变不算冲突。
         - 距离上次更新已过较长时间，且当前活动按常理应自然结束或转场时调用。
-        - `emotion / energy_level / thirst / physical_state / location / target_id / post_event_markers / last_event / pending_tasks` 属于快状态，用来更新当前情绪、体力、地点和上下文锚点。
+        - `emotion / energy_level / thirst / physical_state / context_subject_id / location / target_id / post_event_markers / last_event / pending_tasks` 属于快状态，用来更新当前情绪、体力、地点和上下文锚点。
         - `history_delta` 属于历史计数的增量更新，只在某个事件已经真实发生后再增加对应计数。
         - 普通口头描述、想象、铺垫不要改 `history_delta`。
         - `history_delta` 只能更新当前已注册的 History 键名；
         - Body_Sheet 只能通过 `update_body_sheet` 更新；如果只需要补录 History，也可以单独调用本工具，并填写 `update_reason` 说明原因。
         - 由于工具参数类型限制，`post_event_markers`、`pending_tasks` 需要传 JSON 字符串数组，`last_event` 和 `history_delta` 需要传 JSON 字符串对象。
+        - `context_subject_id` 表示 `location / post_event_markers / pending_tasks` 这组上下文锚点属于谁；若和某个 id 强相关，必须填写该 id，否则填写 `global`。
+        - 如果你没有显式填写 `context_subject_id`，插件会优先用 `last_event.subject_id`，其次用 `target_id` 来推断；推断不到时保留旧值。
         - `last_event` 一旦填写，必须带上 `subject_id`；若该事件不强绑定某个 ID，则填写 `global`。
         - 如果要清空上下文锚点，可以传 `[]` 或 `{}`。
 
         支持部分更新：只传入发生变化的字段即可，未传入字段会沿用旧值。
 
         推荐格式示例：
-        - 更新快状态：`{"physical_state": "Resting", "location": "sofa", "energy_level": 42, "update_reason": "外出回来后开始休息"}`
-        - 更新上下文锚点：`{"post_event_markers": "[\"刚到家\", \"外套还没收\"]", "last_event": "{\"type\":\"return_home\",\"subject_id\":\"global\",\"note\":\"刚结束外出\"}", "pending_tasks": "[\"稍后整理包\"]", "update_reason": "补录最近事件与待办"}`
+        - 更新快状态：`{"physical_state": "Resting", "context_subject_id": "global", "location": "sofa", "energy_level": 42, "update_reason": "外出回来后开始休息"}`
+        - 更新上下文锚点：`{"context_subject_id": "user_123", "post_event_markers": "[\"刚到家\", \"外套还没收\"]", "last_event": "{\"type\":\"return_home\",\"subject_id\":\"user_123\",\"note\":\"刚结束外出\"}", "pending_tasks": "[\"稍后整理包\"]", "update_reason": "补录最近事件与待办"}`
         - 更新历史计数：`{"history_delta": "{\"Orgasm_Count\": 1}", "update_reason": "该事件刚刚实际发生"}`
 
         Args:
@@ -856,6 +935,8 @@ class LivelyState(Star):
             physical_state (str, optional): 物理/行为状态。推荐只使用以下规范值：
                 Idle, Resting, Sleeping, Working, Exercising, Traveling, Socializing。
                 也支持自然语言输入，但插件会先归一化为规范状态再保存。
+            context_subject_id (str, optional): 当前 `location / post_event_markers / pending_tasks` 绑定到哪个 subject。
+                若无强相关对象则填写 `global`；若与某个 id 强相关则填写该 id。
             location (str, optional): 当前轻量地点锚点，例如 `bed`、`sofa`、`desk`、`outdoor`。
             update_reason (str, optional): 状态更新原因。
             target_id (str, optional): 当前关注对象 ID。它只表示“此刻主要在和谁互动”，
@@ -874,6 +955,7 @@ class LivelyState(Star):
             "energy_level": energy_level,
             "thirst": thirst,
             "physical_state": physical_state,
+            "context_subject_id": context_subject_id,
             "location": location,
             "update_reason": update_reason,
             "target_id": target_id,
@@ -985,7 +1067,7 @@ class LivelyState(Star):
         )
 
         prompt_sections = []
-        recent_context_prompt = self._build_recent_context_prompt()
+        recent_context_prompt = self._build_recent_context_prompt(uid)
         if recent_context_prompt:
             prompt_sections.append(recent_context_prompt)
         prompt_sections.append(ori_prompt)
@@ -1065,6 +1147,7 @@ class LivelyState(Star):
             "energy_level",
             "thirst",
             "physical_state",
+            "context_subject_id",
             "location",
             "update_reason",
             "target_id",
@@ -1077,7 +1160,7 @@ class LivelyState(Star):
         required_numeric_fields = ["energy_level", "thirst"]
 
         invalid_text_fields = []
-        for field_name in ["emotion", "physical_state", "update_reason", "target_id"]:
+        for field_name in ["emotion", "physical_state", "context_subject_id", "update_reason", "target_id"]:
             value = payload.get(field_name)
             if value is not None and not str(value).strip():
                 invalid_text_fields.append(field_name)
@@ -1178,7 +1261,7 @@ class LivelyState(Star):
             )
 
         has_scalar_update = any(payload.get(field_name) is not None for field_name in [
-            "emotion", "energy_level", "thirst", "physical_state", "location", "update_reason", "target_id",
+            "emotion", "energy_level", "thirst", "physical_state", "context_subject_id", "location", "update_reason", "target_id",
             "post_event_markers", "last_event", "pending_tasks"
         ])
         if not has_scalar_update and not normalized_body_sheet_updates and not normalized_history_delta:
@@ -1204,12 +1287,25 @@ class LivelyState(Star):
                 )
 
         reason = _safe_text(payload.get("update_reason"), current_state.get("update_reason", "无理由说明。"))
-        target_id = _safe_text(payload.get("target_id"), current_state.get("target_id", "none"))
+        current_target_id = self.global_state.normalize_subject_id(
+            current_state.get("target_id", "none"),
+            fallback="none",
+            allow_none_literal=True,
+        )
+        target_id = self.global_state.normalize_subject_id(
+            payload.get("target_id"),
+            fallback=current_target_id,
+            allow_none_literal=True,
+        )
         current_energy_level = _clamp_int(current_state.get("energy_level"), 100)
         current_thirst = _clamp_int(current_state.get("thirst"), 0)
         next_emotion = _safe_text(payload.get("emotion"), current_state.get("emotion", "Normal"))
         next_energy_level = _clamp_int(payload.get("energy_level"), current_energy_level)
         next_thirst = _clamp_int(payload.get("thirst"), current_thirst)
+        current_context_subject_id = self.global_state.normalize_subject_id(
+            current_state.get("context_subject_id", "global"),
+            fallback="global",
+        )
         current_location = str(current_state.get("location", "")).strip()
         next_location = _safe_optional_text(payload.get("location"), current_location)
         next_target_id = target_id
@@ -1231,6 +1327,29 @@ class LivelyState(Star):
             if pending_tasks is None
             else self.global_state.normalize_text_list(pending_tasks)
         )
+        next_context_subject_id = current_context_subject_id
+        requested_context_subject_id = payload.get("context_subject_id")
+        if requested_context_subject_id is not None:
+            next_context_subject_id = self.global_state.normalize_subject_id(
+                requested_context_subject_id,
+                fallback=current_context_subject_id,
+            )
+        elif any(payload.get(field_name) is not None for field_name in ["location", "post_event_markers", "pending_tasks"]):
+            inferred_context_subject_id = current_context_subject_id
+            if last_event_payload is not None:
+                inferred_context_subject_id = self.global_state.normalize_subject_id(
+                    next_last_event.get("subject_id"),
+                    fallback=inferred_context_subject_id,
+                )
+            elif payload.get("target_id") is not None:
+                inferred_context_subject_id = self.global_state.normalize_subject_id(
+                    target_id,
+                    fallback="global",
+                    allow_none_literal=True,
+                )
+                if inferred_context_subject_id == "none":
+                    inferred_context_subject_id = "global"
+            next_context_subject_id = inferred_context_subject_id
         current_body_sheet = self.global_state.normalize_body_sheet(current_state.get("Body_Sheet", {}))
         merged_body_sheet = self.global_state.merge_body_sheet(current_body_sheet, normalized_body_sheet_updates)
         merged_history = self.global_state.apply_history_delta(current_history, normalized_history_delta)
@@ -1240,8 +1359,9 @@ class LivelyState(Star):
             next_energy_level != current_energy_level,
             next_thirst != current_thirst,
             normalized_physical_state != current_state.get("physical_state", "Idle"),
+            next_context_subject_id != current_context_subject_id,
             next_location != current_location,
-            next_target_id != current_state.get("target_id", "none"),
+            next_target_id != current_target_id,
             next_post_event_markers != current_post_event_markers,
             next_last_event != current_last_event,
             next_pending_tasks != current_pending_tasks,
@@ -1279,6 +1399,7 @@ class LivelyState(Star):
             "energy_level": next_energy_level,
             "thirst": next_thirst,
             "physical_state": normalized_physical_state,
+            "context_subject_id": next_context_subject_id,
             "location": next_location,
             "post_event_markers": next_post_event_markers,
             "last_event": next_last_event,
