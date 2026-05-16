@@ -586,7 +586,74 @@ class GlobalObserver:
         self.new_message_count = 0  
         
         # 用来存储大模型总结出来的“当前状态”
-        self.current_state = ""
+        self.current_state: Dict[str, Any] = {}
+
+    def _normalize_subject_id(self, value: Any, fallback: str = "global") -> str:
+        text = str(value).strip() if value is not None else ""
+        return text or fallback
+
+    def _normalize_recent_event(self, event_data: Any) -> Optional[Dict[str, str]]:
+        if not isinstance(event_data, dict):
+            return None
+
+        summary = str(event_data.get("summary", "")).strip()
+        if not summary:
+            return None
+
+        return {
+            "subject_id": self._normalize_subject_id(event_data.get("subject_id"), fallback="global"),
+            "summary": summary,
+        }
+
+    def _normalize_recent_summary(self, payload: Any) -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+
+        summary = str(payload.get("summary", "")).strip()
+        events: List[Dict[str, str]] = []
+        raw_events = payload.get("events", [])
+        if isinstance(raw_events, list):
+            for event_data in raw_events:
+                normalized_event = self._normalize_recent_event(event_data)
+                if normalized_event:
+                    events.append(normalized_event)
+
+        if not summary and not events:
+            return {}
+
+        return {
+            "summary": summary,
+            "events": events,
+        }
+
+    def _parse_recent_summary(self, raw_text: str) -> Dict[str, Any]:
+        stripped = str(raw_text).strip()
+        if not stripped:
+            return {}
+
+        candidate_text = stripped
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            if len(lines) >= 3 and lines[-1].startswith("```"):
+                candidate_text = "\n".join(lines[1:-1]).strip()
+
+        try:
+            parsed = json_repair.loads(candidate_text)
+        except Exception as e:
+            logger.warning(f"Failed to parse recent summary JSON, using safe fallback. Error: {e}")
+            return {
+                "summary": "最近发生了一些跨用户互动。",
+                "events": [],
+            }
+
+        normalized = self._normalize_recent_summary(parsed)
+        if normalized:
+            return normalized
+
+        return {
+            "summary": "最近发生了一些跨用户互动。",
+            "events": [],
+        }
 
     async def add_message(self, message_text, event, context):
         """积累最近对话，供全局观察者做短期环境总结。
@@ -597,7 +664,12 @@ class GlobalObserver:
         if not str(message_text).strip():
             return
 
-        self.recent_messages.append(message_text)
+        subject_id = self._normalize_subject_id(getattr(event, "unified_msg_origin", None), fallback="global")
+        normalized_message = str(message_text)
+        if "[subject_id:" not in normalized_message:
+            normalized_message = f"[subject_id:{subject_id}] {normalized_message}"
+
+        self.recent_messages.append(normalized_message)
         self.new_message_count += 1
         
         # 检查是否达到了触发总结的条件
@@ -627,10 +699,11 @@ class GlobalObserver:
             logger.warning(f"Global observer summarization failed: {e}")
             return False
 
-        if not str(summary).strip():
+        normalized_summary = self._parse_recent_summary(summary)
+        if not normalized_summary:
             return False
 
-        self.current_state = f"<recent_chat_summary>{summary.strip()}</recent_chat_summary>"
+        self.current_state = normalized_summary
         return True
 
     async def send_prompt(self, event, context, extra_prompt=""):
@@ -645,11 +718,16 @@ class GlobalObserver:
 
         #发送信息到llm
         sys_msg = (f"你是一个系统后台的“认知状态提取器。\n"
-                        f"你的任务是阅读系统刚刚发生的 N 条多用户对话记录，提炼出 AI 助手此刻的“心境、刚刚聊了什么或整体氛围”，并浓缩成一，两句话。\n"
+                        f"你的任务是阅读系统刚刚发生的 N 条多用户对话记录，提炼出 AI 助手此刻的整体氛围，以及与不同 subject_id 相关的最近事件。\n"
                         f"【绝对规则】（违反将导致系统崩溃）：\n"
                         f"1. 视角限制：只能描述“系统/AI助手”刚刚经历了什么，不要复述用户说了什么。\n"
-                        f"2. 格式要求：输出必须是一句简短的、以第一人称或客观状态描述的中文句子，最多不超过 50 个字。严禁输出“摘要如下”、“我现在的状态是”等任何废话。\n"
-                        f"3. 不要输出可识别的具体用户标识；如果必须提到互动对象，只能用“某位用户/另一位用户”等模糊称呼，并明确这只是后台参考，不代表当前会话对象。\n"
+                        f"2. 你必须严格输出一个 JSON 对象，不允许输出任何额外文字、代码块或解释。\n"
+                        f"3. JSON 格式固定为：{{\"summary\":\"整体氛围摘要\",\"events\":[{{\"subject_id\":\"global或输入中出现的subject_id\",\"summary\":\"与该subject强相关的事件摘要\"}}]}}。\n"
+                        f"4. `summary` 只能描述整体氛围或全局状态，不能写某个特定对象的专属事件，也不能写具体用户名字。\n"
+                        f"5. 任何与具体对象强相关的事件，都必须写入 `events`，并且必须填写 `subject_id`；如果事件不强绑定某个对象，`subject_id` 必须写 `global`。\n"
+                        f"6. `subject_id` 必须直接使用输入记录里出现的 `[subject_id:xxx]` 标记值，不得自造、改写或省略。\n"
+                        f"7. 不要输出可识别的具体用户名字；需要指代对象时只使用 `subject_id`。\n"
+                        f"8. `summary` 最多 50 个字；每个 `events[].summary` 最多 30 个字；`events` 最多 5 条。\n"
                         f"以下是你最近与多位用户的聊天记录。assistant表示AI助手的回复，user表示用户的提问：\n"
                     )
         provider = context.get_using_provider()
@@ -877,12 +955,47 @@ class LivelyState(Star):
         if not self.global_observer.current_state:
             return ""
 
+        current_session_subject_id = str(current_uid).strip() or "global"
+        recent_context_payload: Dict[str, Any]
+        if isinstance(self.global_observer.current_state, dict):
+            raw_summary = str(self.global_observer.current_state.get("summary", "")).strip()
+            recent_events: List[Dict[str, str]] = []
+            omitted_other_subject_events = 0
+            for event_data in self.global_observer.current_state.get("events", []):
+                if not isinstance(event_data, dict):
+                    continue
+                subject_id = self.global_state.normalize_subject_id(
+                    event_data.get("subject_id"),
+                    fallback="global",
+                )
+                summary = str(event_data.get("summary", "")).strip()
+                if not summary:
+                    continue
+                if subject_id in {"global", current_session_subject_id}:
+                    recent_events.append({
+                        "subject_id": subject_id,
+                        "summary": summary,
+                    })
+                else:
+                    omitted_other_subject_events += 1
+
+            recent_context_payload = {
+                "summary": raw_summary,
+                "events": recent_events,
+            }
+            if omitted_other_subject_events > 0:
+                recent_context_payload["omitted_other_subject_events"] = omitted_other_subject_events
+            recent_context_text = self._format_structured_state_block(recent_context_payload, compact=True)
+        else:
+            recent_context_text = str(self.global_observer.current_state).strip()
+
         return (
             "<recent_global_context>\n"
             "This block is reference-only. If it conflicts with GLOBAL STATE AUTHORITY, obey GLOBAL STATE AUTHORITY.\n"
             "Never treat users mentioned here as the current conversation user unless GLOBAL STATE says subject_id or target_id matches current_session_subject_id.\n"
+            "Only events with subject_id=global or subject_id=current_session_subject_id are included below; other subject-bound events are omitted on purpose.\n"
             f"current_session_subject_id={current_uid}\n"
-            f"{self.global_observer.current_state}\n"
+            f"recent_context={recent_context_text}\n"
             "</recent_global_context>"
         )
 
